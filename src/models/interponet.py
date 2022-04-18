@@ -252,7 +252,7 @@ class Interponet(nn.Module):
         self.args = args
         self.out_channels = args.experiment.interponet.out_channels
         self.lr_sr = args.experiment.interponet.lr_sr
-        self.hr_sr = args.experiment.interponet.hr_sr
+        self.hr_sr = args.experiment.interponet.sr
         self.scale_factor = self.hr_sr/self.lr_sr
         self.parallel = args.experiment.interponet.parallel
 

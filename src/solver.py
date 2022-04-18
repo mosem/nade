@@ -31,6 +31,7 @@ from src.sisnr_loss import SisnrLoss
 from src.charbonnier_loss import Charbonnier_loss
 from src.stft_loss import MultiResolutionSTFTLoss
 from src.utils import bold, copy_state, pull_metric, serialize_model, swap_state, LogProgress
+from src.augment import Augment
 
 from torchaudio.functional import resample
 
@@ -118,6 +119,11 @@ class Solver(object):
                                             n_mels=self.args.experiment.mel_loss_n_mels,
                                             hop_length=self.args.experiment.mel_loss_hop_length,
                                             win_length=self.args.experiment.mel_loss_win_length).to(self.device)
+
+        scale_factor = int(args.experiment.hr_sr / args.experiment.lr_sr)
+        self.hr_augment = Augment(args.experiment.hr_sr, args.experiment.n_bands)
+        self.lr_augment = Augment(args.experiment.lr_sr, int(args.experiment.n_bands/scale_factor))
+
         self._reset()
 
     def _copy_models_states(self):
@@ -302,68 +308,29 @@ class Solver(object):
         logprog = LogProgress(logger, data_loader, updates=self.num_prints, name=name)
         for i, data in enumerate(logprog):
             lr, hr = [x.to(self.device) for x in data]
-            out = self.dmodel(lr, hr.shape[-1])
-            if self.args.experiment.model == 'interponet_2':
-                pyramid_losses = {}
-                hr_sr = self.args.experiment.hr_sr
-                lr_sr = self.args.experiment.lr_sr
-                for i, pr in enumerate(out):
-                    sr_factor = 2**(i+1)
-                    hr_tmp = resample(hr, hr_sr, lr_sr*sr_factor)
-                    loss_i = self._get_loss(hr_tmp, pr)
-                    pyramid_losses.update({f'loss_{i}': loss_i})
-                loss = sum([l for l in pyramid_losses.values()])
-                if self.adversarial_mode:
-                    generator_loss, discriminator_loss = self._get_melgan_adversarial_loss(hr, pr) # get loss from last layer only
-                    loss += generator_loss
-                # optimize model in training mode
-                if not cross_valid:
-                    self._optimize(loss)
-                    if self.disc_optimizer is not None:
-                        self._optimize_adversarial(discriminator_loss)
+            pr = self.dmodel(lr, hr.shape[-1])
 
-                logprog.update(loss=format(loss / (i + 1), ".5f"))
-                del out
+            if self.adversarial_mode:
+                if self.args.experiment.discriminator_model == 'hifi':
+                    loss, discriminator_loss = self._get_hifi_adversarial_loss(hr, pr)
+                else:
+                    loss, discriminator_loss = self._get_melgan_adversarial_loss(hr, pr)
             else:
-                if self.args.experiment.model == 'interponet':
-                    pr = out['full_band']
-                elif self.args.experiment.model == 'lapsrn':
-                    pr = out[-1]
-                else:
-                    pr = out
-                # apply a loss function after each layer
+                loss = self._get_loss(hr, pr)
 
-                if self.adversarial_mode:
-                    if self.args.experiment.discriminator_model == 'hifi':
-                        loss, discriminator_loss = self._get_hifi_adversarial_loss(hr, pr)
-                    else:
-                        loss, discriminator_loss = self._get_melgan_adversarial_loss(hr, pr)
-                else:
-                    loss = self._get_loss(hr, pr)
+            # optimize model in training mode
+            if not cross_valid:
+                self._optimize(loss, pyramid_losses=None)
+                if self.disc_optimizer is not None:
+                    self._optimize_adversarial(discriminator_loss)
 
-
-                if 'pyramid_loss' in self.args.experiment and self.args.experiment.pyramid_loss and self.args.experiment.model == 'interponet':
-                    pyramid_losses = self.pyramid_loss(out, hr)
-                else:
-                    pyramid_losses = None
-
-                # optimize model in training mode
-                if not cross_valid:
-                    self._optimize(loss, pyramid_losses)
-                    if self.disc_optimizer is not None:
-                        self._optimize_adversarial(discriminator_loss)
-
-                logprog.update(loss=format(loss / (i + 1), ".5f"))
-                # Just in case, clear some memory
-                del pr
+            logprog.update(loss=format(loss / (i + 1), ".5f"))
+            # Just in case, clear some memory
+            del pr
 
         avg_losses = {'generator': loss.item() / (i + 1)}
         if self.adversarial_mode:
             avg_losses.update({'discriminator': discriminator_loss.item() / (i + 1)})
-        if self.args.experiment.model == 'interponet_2':
-            avg_losses.update({k: v.item() / (i + 1) for k, v in pyramid_losses.items()})
-        if 'pyramid_loss' in self.args.experiment and self.args.experiment.pyramid_loss and self.args.experiment.model == 'interponet':
-            avg_losses.update({k:v.item()/(i+1) for k,v in pyramid_losses.items()})
         return avg_losses
 
 
@@ -396,8 +363,6 @@ class Solver(object):
 
         discriminator = self.dmodels['melgan']
 
-        if self.args.experiment.model == 'lapsrn':
-            pr = pr[-1]
 
         discriminator_fake_detached = discriminator(pr.detach())
         discriminator_real = discriminator(hr)
@@ -405,12 +370,6 @@ class Solver(object):
 
         total_loss_discriminator = self._get_melgan_discriminator_loss(discriminator_fake_detached, discriminator_real)
         generator_loss = self._get_melgan_generator_loss(discriminator_fake, discriminator_real)
-        # if self.args.loss != '':
-        #     diff_loss = self._get_loss(hr, pr)
-        # else:
-        #     diff_loss = 0
-        # total_loss_generator = self.args.experiment.melgan_gen_loss_lambda*generator_loss + \
-        #                        self.args.experiment.melgan_diff_loss_lambda*diff_loss
 
         return generator_loss, total_loss_discriminator
 

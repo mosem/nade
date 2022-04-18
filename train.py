@@ -46,7 +46,7 @@ def run(args):
                                num_workers=args.num_workers)
     if args.dset.valid:
         cv_dataset = LrHrSet(args.dset.test, args.experiment.lr_sr, args.experiment.hr_sr,
-                            stride=None, segment=None)
+                             stride=None, segment=None)
         cv_loader = distrib.loader(cv_dataset, batch_size=1, shuffle=False, num_workers=args.num_workers)
     else:
         cv_loader = None

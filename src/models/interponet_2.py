@@ -268,7 +268,7 @@ class Interponet_2(nn.Module):
         self.hp_n_res_layers = args.experiment.interponet.hp_n_res_layers
 
         self.lr_sr = args.experiment.interponet.lr_sr
-        self.hr_sr = args.experiment.interponet.hr_sr
+        self.hr_sr = args.experiment.interponet.sr
         self.scale_factor = int(self.hr_sr / self.lr_sr)
 
         self.n_upscale_blocks = int(math.log2(self.scale_factor))

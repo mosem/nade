@@ -31,6 +31,4 @@ discriminator:
   downsampling_factor: 4
   ndf: 16
 
-
-melgan_gen_loss_lambda: 1
-melgan_diff_loss_lambda: 1
+n_bands: 4

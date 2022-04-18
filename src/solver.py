@@ -88,6 +88,7 @@ class Solver(object):
 
         # Training config
         self.device = args.device
+        logger.info(f'device: {self.device}')
         self.epochs = args.epochs
 
         # Checkpoints
@@ -120,9 +121,9 @@ class Solver(object):
                                             hop_length=self.args.experiment.mel_loss_hop_length,
                                             win_length=self.args.experiment.mel_loss_win_length).to(self.device)
 
-        scale_factor = int(args.experiment.hr_sr / args.experiment.lr_sr)
-        self.hr_augment = Augment(args.experiment.hr_sr, args.experiment.n_bands)
-        self.lr_augment = Augment(args.experiment.lr_sr, int(args.experiment.n_bands/scale_factor))
+        # scale_factor = int(args.experiment.hr_sr / args.experiment.lr_sr)
+        self.hr_augment = Augment(args.experiment.hr_sr, args.experiment.n_bands).to(self.device)
+        # self.lr_augment = Augment(args.experiment.lr_sr, int(args.experiment.n_bands/scale_factor))
 
         self._reset()
 
@@ -308,7 +309,10 @@ class Solver(object):
         logprog = LogProgress(logger, data_loader, updates=self.num_prints, name=name)
         for i, data in enumerate(logprog):
             lr, hr = [x.to(self.device) for x in data]
-            pr = self.dmodel(lr, hr.shape[-1])
+            bands = self.hr_augment(hr)
+            masks = torch.zeros_like(bands)
+            input = torch.cat([lr,bands,masks],dim=1)
+            pr = self.dmodel(input, hr.shape[-1])
 
             if self.adversarial_mode:
                 if self.args.experiment.discriminator_model == 'hifi':
@@ -326,7 +330,7 @@ class Solver(object):
 
             logprog.update(loss=format(loss / (i + 1), ".5f"))
             # Just in case, clear some memory
-            del pr
+            del pr, bands, masks
 
         avg_losses = {'generator': loss.item() / (i + 1)}
         if self.adversarial_mode:

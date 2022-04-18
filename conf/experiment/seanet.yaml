@@ -19,6 +19,8 @@ seanet:
   normalize: True
   floor: 1e-3
   ratios: [ 8,8,2,2 ]
+  in_channels: 5
+  out_channels: 1
   lr_sr: ${experiment.lr_sr}
   hr_sr: ${experiment.hr_sr}
 
@@ -31,4 +33,4 @@ discriminator:
   downsampling_factor: 4
   ndf: 16
 
-n_bands: 4
+n_bands: 2

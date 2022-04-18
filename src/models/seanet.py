@@ -26,6 +26,8 @@ class Seanet(nn.Module):
         self.resample = resample
         self.normalize = normalize
         self.floor = floor
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         self.lr_sr = lr_sr
         self.hr_sr = hr_sr
         self.scale_factor = int(self.hr_sr/self.lr_sr)
@@ -88,7 +90,7 @@ class Seanet(nn.Module):
 
         encoder_wrapper_conv_layer = [
             nn.ReflectionPad1d(3),
-            WNConv1d(in_channels, ngf, kernel_size=7, padding=0),
+            WNConv1d(self.in_channels, ngf, kernel_size=7, padding=0),
             nn.Tanh(),
         ]
         self.encoder.insert(0, nn.Sequential(*encoder_wrapper_conv_layer))
@@ -134,6 +136,14 @@ class Seanet(nn.Module):
         return signal, padding_len
 
     def forward(self, signal, hr_len=None):
+        """
+
+        :param signal: [Batch-size, in_channels, Time]
+                    in_channels: lr channel, hr_band_1,...,hr_band_n
+        :param hr_len:
+        :return:  [Batch-size, out_channels, Time]
+                    out_channels: hr_band_1,...,hr_band_n
+        """
 
         target_len = signal.shape[-1]
         if self.upsample:
@@ -146,7 +156,7 @@ class Seanet(nn.Module):
             std = 1
         x = signal
         # print(f'target_len: {target_len}')
-        # print(f'beginning of seanet: {x.shape}')
+        print(f'beginning of seanet: {x.shape}')
         if self.upsample:
             x = resample(x,self.lr_sr, self.hr_sr)
         # print(f'after resample: {x.shape}')
@@ -167,4 +177,8 @@ class Seanet(nn.Module):
             x = x[...,:target_len]
         # print(f'after trimming: {x.shape}, trim: {trim_len}')
         # print(f'end of seanet: {x.shape}')
-        return std * x
+        x = std * x
+        x = x.view(x.size(0), self.out_channels, x.size(-1))
+        print(f'end of seanet: {x.shape}')
+        return x
+

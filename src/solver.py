@@ -122,7 +122,7 @@ class Solver(object):
                                             win_length=self.args.experiment.mel_loss_win_length).to(self.device)
 
         # scale_factor = int(args.experiment.hr_sr / args.experiment.lr_sr)
-        self.hr_augment = Augment(args.experiment.hr_sr, args.experiment.n_bands).to(self.device)
+        # self.hr_augment = Augment(args.experiment.hr_sr, args.experiment.n_bands)
         # self.lr_augment = Augment(args.experiment.lr_sr, int(args.experiment.n_bands/scale_factor))
 
         self._reset()
@@ -308,11 +308,12 @@ class Solver(object):
         name = label + f" | Epoch {epoch + 1}"
         logprog = LogProgress(logger, data_loader, updates=self.num_prints, name=name)
         for i, data in enumerate(logprog):
-            lr, hr = [x.to(self.device) for x in data]
-            bands = self.hr_augment(hr)
-            masks = torch.zeros_like(bands)
-            input = torch.cat([lr,bands,masks],dim=1)
-            pr = self.dmodel(input, hr.shape[-1])
+            lr, hr_bands = [x.to(self.device) for x in data]
+
+            masks = torch.zeros_like(hr_bands)
+            input = torch.cat([lr, hr_bands,masks],dim=1)
+            logger.info(f'input shape: {input.shape}')
+            pr = self.dmodel(input, hr_bands.shape[-1])
 
             if self.adversarial_mode:
                 if self.args.experiment.discriminator_model == 'hifi':
@@ -320,7 +321,7 @@ class Solver(object):
                 else:
                     loss, discriminator_loss = self._get_melgan_adversarial_loss(hr, pr)
             else:
-                loss = self._get_loss(hr, pr)
+                loss = self._get_loss(hr_bands, pr)
 
             # optimize model in training mode
             if not cross_valid:

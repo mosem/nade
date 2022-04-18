@@ -5,6 +5,8 @@ from src.utils import capture_init
 from torchaudio.functional import resample
 from torch.nn import functional as F
 
+import logging
+logger = logging.getLogger(__name__)
 
 class Seanet(nn.Module):
 
@@ -156,7 +158,7 @@ class Seanet(nn.Module):
             std = 1
         x = signal
         # print(f'target_len: {target_len}')
-        print(f'beginning of seanet: {x.shape}')
+        logger.info(f'beginning of seanet: {x.shape}')
         if self.upsample:
             x = resample(x,self.lr_sr, self.hr_sr)
         # print(f'after resample: {x.shape}')
@@ -170,6 +172,7 @@ class Seanet(nn.Module):
         for j, decode in enumerate(self.decoder):
             x = decode(x)
             skip = skips.pop(-1)
+            logger.info(f'x shape: {x.shape}, skip shape: {skip.shape}')
             x = x + skip
         # print(f'before trimming: {x.shape}')
         # trim_len = x.shape[-1] - hr_len

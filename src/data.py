@@ -12,6 +12,9 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset
 from src.audio import Audioset
 from torchaudio import transforms
+from torchaudio.functional import resample
+
+from src.augment import Augment
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +88,7 @@ class PrHrSet(Dataset):
 
 class LrHrSet(Dataset):
     def __init__(self, json_dir, lr_sr, hr_sr, stride = None, segment = None,
-                 pad=True, with_path=False):
+                 pad=True, with_path=False, n_bands=2):
         """__init__.
         :param json_dir: directory containing both hr.json and lr.json
         :param length: maximum sequence length
@@ -99,6 +102,8 @@ class LrHrSet(Dataset):
         self.lr_sr = lr_sr
         self.hr_sr = hr_sr
         self.with_path = with_path
+        self.n_bands = n_bands
+        self.hr_augment = Augment(self.hr_sr, self.n_bands)
         lr_json = os.path.join(json_dir, 'lr.json')
         hr_json = os.path.join(json_dir, 'hr.json')
         with open(lr_json, 'r') as f:
@@ -127,6 +132,10 @@ class LrHrSet(Dataset):
             hr_sig = self.hr_set[index]
             lr_sig = self.lr_set[index]
         hr_sig = match_hr_signal(hr_sig, lr_sig, self.hr_sr / self.lr_sr)
+
+        lr_sig = resample(lr_sig, self.lr_sr, self.hr_sr)
+
+        hr_sig = self.hr_augment(hr_sig)
 
         if self.with_path:
             return (lr_sig, lr_path), (hr_sig, hr_path)

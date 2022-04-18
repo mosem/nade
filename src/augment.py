@@ -11,7 +11,9 @@ class Augment(nn.Module):
         self.sr = sr
         self.n_bands = n_bands
 
-        self.band_width = sr / n_bands
+        eps = 1e-7
+
+        self.band_width = (sr/2) / n_bands - eps
         self.bands = [(i * self.band_width, (i + 1) * self.band_width) for i in range(n_bands)]
 
         # self.band_reject_chains = []
@@ -30,6 +32,6 @@ class Augment(nn.Module):
         """
         bands = []
         for band_idx in range(self.n_bands):
-            bands.append(sox_effects.apply_effects_tensor(x, self.sr, self.effects[band_idx], channels_first=True))
+            bands.append(sox_effects.apply_effects_tensor(x, self.sr, self.effects[band_idx], channels_first=True)[0])
             # bands.append(self.band_reject_chains[band_idx].apply(x, src_info={'rate': self.sr}))
-        return torch.cat(bands, dim=1)
+        return torch.cat(bands, dim=0)

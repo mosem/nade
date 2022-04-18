@@ -1,0 +1,5 @@
+# @package dset
+name: dummy-8-16
+train: egs/vctk/multi-speaker/8-16(32)/tr
+valid: egs/vctk/multi-speaker/8-16(32)/val
+test: egs/vctk/multi-speaker/8-16(32)/val

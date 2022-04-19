@@ -47,6 +47,11 @@ def evaluate(args, data_loader, epoch):
                 hr = hr.cpu()
                 pr = pr.cpu()
 
+            hr = torch.sum(hr, keepdim=True, dim=1)
+            pr = torch.sum(pr, keepdim=True, dim=1)
+
+
+
             pesq_i, stoi_i, snr_i, lsd_i, sisnr_i, visqol_i, estimate_i = run_metrics(hr, pr, args, filename)
             if filename in files_to_log:
                 log_to_wandb(estimate_i, pesq_i, stoi_i, snr_i, lsd_i, sisnr_i, visqol_i,

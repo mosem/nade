@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from tqdm import tqdm
+import torch
 import torchaudio
 import math
 import sys
@@ -136,6 +137,9 @@ class LrHrSet(Dataset):
         lr_sig = resample(lr_sig, self.lr_sr, self.hr_sr)
 
         hr_sig = self.hr_augment(hr_sig)
+
+        masks = torch.zeros_like(hr_sig)
+        lr_sig = torch.cat([lr_sig, hr_sig, masks], dim=0)
 
         if self.with_path:
             return (lr_sig, lr_path), (hr_sig, hr_path)

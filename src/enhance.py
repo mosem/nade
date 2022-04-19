@@ -12,6 +12,8 @@ from src.utils import LogProgress
 from src.data import LrHrSet
 from src.models.sinc import Sinc
 
+from torchaudio.functional import resample
+
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,10 @@ def write(wav, filename, sr):
 def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr):
     # Write result
     for lr, hr, pr, filename in zip(lr_sigs, hr_sigs, processed_sigs, filenames):
+        hr = torch.sum(hr, keepdim=True, dim=0)
+        pr = torch.sum(pr, keepdim=True, dim=0)
+        lr = lr[0:1,:]
+        lr = resample(lr, hr_sr, lr_sr)
         write(lr, filename + "_lr.wav", sr=lr_sr)
         write(hr, filename + "_hr.wav", sr=hr_sr)
         write(pr, filename + "_pr.wav", sr=hr_sr)

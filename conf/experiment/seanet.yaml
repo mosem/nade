@@ -29,6 +29,7 @@ adversarial: True
 features_loss_lambda: 100
 discriminator_model: melgan #melgan/hifi
 discriminator:
+  in_channels: ${experiment.seanet.out_channels}
   n_layers: 4
   num_D: 3
   downsampling_factor: 4

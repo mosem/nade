@@ -99,12 +99,12 @@ class PixelUnshuffle1D(nn.Module):
 
 
 class NLayerDiscriminator(nn.Module):
-    def __init__(self, ndf, n_layers, downsampling_factor):
+    def __init__(self, in_channels, ndf, n_layers, downsampling_factor):
         super().__init__()
         model = nn.ModuleDict()
         model["layer_0"] = nn.Sequential(
             nn.ReflectionPad1d(7),
-            WNConv1d(1, ndf, kernel_size=15),
+            WNConv1d(in_channels, ndf, kernel_size=15),
             nn.LeakyReLU(0.2, True),
         )
 
@@ -145,13 +145,13 @@ class NLayerDiscriminator(nn.Module):
 
 class Discriminator(nn.Module):
     @capture_init
-    def __init__(self, num_D, ndf, n_layers, downsampling_factor):
+    def __init__(self, in_channels, num_D, ndf, n_layers, downsampling_factor):
         super().__init__()
         self.model = nn.ModuleDict()
         self.num_D = num_D
         for i in range(num_D):
             self.model[f"disc_{i}"] = NLayerDiscriminator(
-                ndf, n_layers, downsampling_factor
+                in_channels, ndf, n_layers, downsampling_factor
             )
 
         self.downsample = nn.AvgPool1d(4, stride=2, padding=1, count_include_pad=False)

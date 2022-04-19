@@ -310,16 +310,18 @@ class Solver(object):
         for i, data in enumerate(logprog):
             lr, hr_bands = [x.to(self.device) for x in data]
 
-            masks = torch.zeros_like(hr_bands)
-            input = torch.cat([lr, hr_bands,masks],dim=1)
-            logger.info(f'input shape: {input.shape}')
-            pr = self.dmodel(input, hr_bands.shape[-1])
+            # masks = torch.zeros_like(hr_bands)
+            # input = torch.cat([lr, hr_bands,masks],dim=1)
+
+            pr = self.dmodel(lr, hr_bands.shape[-1])
+
+            logger.info(f'lr shape: {lr.shape}, hr_bands shape: {hr_bands.shape}, pr shape: {pr.shape}')
 
             if self.adversarial_mode:
                 if self.args.experiment.discriminator_model == 'hifi':
-                    loss, discriminator_loss = self._get_hifi_adversarial_loss(hr, pr)
+                    loss, discriminator_loss = self._get_hifi_adversarial_loss(hr_bands, pr)
                 else:
-                    loss, discriminator_loss = self._get_melgan_adversarial_loss(hr, pr)
+                    loss, discriminator_loss = self._get_melgan_adversarial_loss(hr_bands, pr)
             else:
                 loss = self._get_loss(hr_bands, pr)
 
@@ -331,7 +333,7 @@ class Solver(object):
 
             logprog.update(loss=format(loss / (i + 1), ".5f"))
             # Just in case, clear some memory
-            del pr, bands, masks
+            del pr, lr, hr_bands
 
         avg_losses = {'generator': loss.item() / (i + 1)}
         if self.adversarial_mode:

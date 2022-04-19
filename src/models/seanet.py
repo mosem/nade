@@ -167,13 +167,14 @@ class Seanet(nn.Module):
         # print(f'after padding: {x.shape}, padding: {padding_len}')
         skips = []
         for i, encode in enumerate(self.encoder):
-            skips.append(x)
+            logger.info(f'encode {i}. x shape: {x.shape}')
             x = encode(x)
+            skips.append(x)
         for j, decode in enumerate(self.decoder):
-            x = decode(x)
             skip = skips.pop(-1)
-            logger.info(f'x shape: {x.shape}, skip shape: {skip.shape}')
+            logger.info(f'decode {j}. x shape: {x.shape}, skip shape: {skip.shape}')
             x = x + skip
+            x = decode(x)
         # print(f'before trimming: {x.shape}')
         # trim_len = x.shape[-1] - hr_len
         if target_len < x.shape[-1]:
@@ -182,6 +183,6 @@ class Seanet(nn.Module):
         # print(f'end of seanet: {x.shape}')
         x = std * x
         x = x.view(x.size(0), self.out_channels, x.size(-1))
-        print(f'end of seanet: {x.shape}')
+        logger.info(f'end of seanet: {x.shape}')
         return x
 

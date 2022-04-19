@@ -43,6 +43,8 @@ def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr):
     # Write result
     for lr, hr, pr, filename in zip(lr_sigs, hr_sigs, processed_sigs, filenames):
         hr = torch.sum(hr, keepdim=True, dim=0)
+        write(pr[0:1,:], filename + "_pr_1.wav", sr=hr_sr)
+        write(pr[1:2,:], filename + "_pr_2.wav", sr=hr_sr)
         pr = torch.sum(pr, keepdim=True, dim=0)
         lr = lr[0:1,:]
         lr = resample(lr, hr_sr, lr_sr)

@@ -315,34 +315,40 @@ class Solver(object):
 
             pr = self.dmodel(lr, hr_bands.shape[-1])
 
-            logger.info(f'lr shape: {lr.shape}, hr_bands shape: {hr_bands.shape}, pr shape: {pr.shape}')
+            # logger.info(f'lr shape: {lr.shape}, hr_bands shape: {hr_bands.shape}, pr shape: {pr.shape}')
 
             if self.adversarial_mode:
                 if self.args.experiment.discriminator_model == 'hifi':
-                    loss, discriminator_loss = self._get_hifi_adversarial_loss(hr_bands, pr)
+                    total_loss, discriminator_loss = self._get_hifi_adversarial_loss(hr_bands, pr)
                 else:
-                    loss, discriminator_loss = self._get_melgan_adversarial_loss(hr_bands, pr)
+                    total_loss, discriminator_loss = self._get_melgan_adversarial_loss(hr_bands, pr)
             else:
-                loss = self._get_loss(hr_bands, pr)
+                loss, stft_loss = self._get_loss(hr_bands, pr)
+                total_loss = loss + stft_loss
 
             # optimize model in training mode
             if not cross_valid:
-                self._optimize(loss, pyramid_losses=None)
+                self._optimize(total_loss, pyramid_losses=None)
                 if self.disc_optimizer is not None:
                     self._optimize_adversarial(discriminator_loss)
 
-            logprog.update(loss=format(loss / (i + 1), ".5f"))
+            logprog.update(loss=format(total_loss / (i + 1), ".5f"))
             # Just in case, clear some memory
             del pr, lr, hr_bands
 
-        avg_losses = {'generator': loss.item() / (i + 1)}
+        avg_losses = {'generator': total_loss.item() / (i + 1)}
         if self.adversarial_mode:
             avg_losses.update({'discriminator': discriminator_loss.item() / (i + 1)})
+        else:
+            avg_losses.update({'l1': loss.item() / (i + 1), 'stft': stft_loss.item() / (i + 1)})
         return avg_losses
 
 
     def _get_loss(self, hr, pr):
         loss = 0
+        stft_loss = 0
+        hr = torch.sum(hr, keepdim=True, dim=1)
+        pr = torch.sum(pr, keepdim=True, dim=1)
         with torch.autograd.set_detect_anomaly(True):
             if self.args.loss == '':
                 pass
@@ -361,10 +367,11 @@ class Solver(object):
             # MultiResolution STFT loss
             if self.args.stft_loss:
                 sc_loss, mag_loss = self.mrstftloss(pr.squeeze(1), hr.squeeze(1))
-                loss += sc_loss + mag_loss
+                stft_loss = sc_loss + mag_loss
 
 
-        return loss
+
+        return loss, stft_loss
 
     def _get_melgan_adversarial_loss(self, hr, pr):
 

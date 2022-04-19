@@ -49,7 +49,7 @@ def create_results_df(args, data_loader, epoch):
     for i, data in enumerate(data_loader):
         lr, hr, pr, filename = data
         filename = filename[0]
-        logger.info(f'hr shape: {hr.shape}, pr shape: {pr.shape}')
+        # logger.info(f'hr shape: {hr.shape}, pr shape: {pr.shape}')
         # hr = torch.sum(hr, keepdim=True, dim=1)
         # pr = torch.sum(pr, keepdim=True, dim=1)
         pesq, stoi, pr_snr, lsd, sisnr, visqol, estimate = run_metrics(hr, pr, args, filename)

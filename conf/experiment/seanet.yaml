@@ -16,10 +16,10 @@ seanet:
   ngf: 32
   n_residual_layers: 3
   resample: 1
-  normalize: True
+  normalize: False
   floor: 1e-3
   ratios: [ 8,8,2,2 ]
-  in_channels: 5
+  in_channels: 3
   out_channels: 2
   lr_sr: ${experiment.lr_sr}
   hr_sr: ${experiment.hr_sr}

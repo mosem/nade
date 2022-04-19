@@ -138,9 +138,9 @@ class LrHrSet(Dataset):
 
         hr_sig = self.hr_augment(hr_sig)
 
-        # masks = torch.zeros_like(hr_sig)
-        # lr_sig = torch.cat([lr_sig, hr_sig, masks], dim=0)
-        lr_sig = torch.cat([lr_sig, hr_sig], dim=0)
+        masks = torch.zeros_like(hr_sig)
+        lr_sig = torch.cat([lr_sig, hr_sig, masks], dim=0)
+        # lr_sig = torch.cat([lr_sig, hr_sig], dim=0)
 
         if self.with_path:
             return (lr_sig, lr_path), (hr_sig, hr_path)

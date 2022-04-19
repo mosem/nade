@@ -154,7 +154,7 @@ class Seanet(nn.Module):
             mono = signal.mean(dim=1, keepdim=True)
             mean = mono.mean(dim=-1, keepdim=True)
             std = mono.std(dim=-1, keepdim=True)
-            signal = (signal - mean)/ (self.floor + std)
+            signal = (signal - mean) / (self.floor + std)
         else:
             mean = 0
             std = 1

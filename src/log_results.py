@@ -6,6 +6,7 @@ from torchaudio.transforms import Spectrogram
 import numpy as np
 import torch
 from torchaudio import transforms
+from torchaudio.functional import resample
 
 from .metrics import run_metrics, get_snr
 
@@ -56,6 +57,7 @@ def create_results_df(args, data_loader, epoch):
 
         upsampled_lr = upsample_fn(lr)
         upsampled_lr = match_signal(upsampled_lr, hr.shape[-1])
+        logger.info(f'hr shape: {hr.shape}, upsampled_lr shape: {upsampled_lr.shape}')
         lr_snr = get_snr(hr.numpy(), upsampled_lr.numpy()).item()
 
         df.loc[i] = [filename, lr_snr, pr_snr, pesq, stoi, lsd, sisnr, visqol]
@@ -171,13 +173,21 @@ def init_wandb_table():
 
 
 def add_data_to_wandb_table(signals, metrics, filename, args, wandb_table):
+    # logger.info(f'adding data to wandb table: {filename}')
+
     hr, lr, pr = signals
 
     spectrogram_transform = Spectrogram()
 
     hr_spectrogram = spectrogram_transform(hr).log2()[0, :, :].numpy()
-    lr_spectrogram = (SPECTOGRAM_EPSILON + spectrogram_transform(lr)).log2()[0, :, :].numpy()
+    lr_upsampled = resample(lr, args.experiment.lr_sr, args.experiment.hr_sr)
+    lr_spectrogram = (SPECTOGRAM_EPSILON + spectrogram_transform(lr_upsampled)).log2()[0, :, :].numpy()
+    # lr_spectrogram_padding = np.zeros_like(lr_spectrogram) + SPECTOGRAM_EPSILON
+    # lr_spectrogram = np.append(lr_spectrogram, lr_spectrogram_padding, 2)
     pr_spectrogram = spectrogram_transform(pr).log2()[0, :, :].numpy()
+
+    # logger.info(f'lr spec shape: {lr_spectrogram.shape}, hr spec shape: {hr_spectrogram.shape}')
+
     hr_wandb_spec = wandb.Image(convert_spectrogram_to_heatmap(hr_spectrogram))
     lr_wandb_spec = wandb.Image(convert_spectrogram_to_heatmap(lr_spectrogram))
     pr_wandb_spec = wandb.Image(convert_spectrogram_to_heatmap(pr_spectrogram))

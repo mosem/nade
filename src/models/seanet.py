@@ -141,7 +141,7 @@ class Seanet(nn.Module):
         """
 
         :param signal: [Batch-size, in_channels, Time]
-                    in_channels: lr channel, hr_band_1,...,hr_band_n
+                    in_channels: lr channel, hr_band_1,...,hr_band_n, masks_sentinels
         :param hr_len:
         :return:  [Batch-size, out_channels, Time]
                     out_channels: hr_band_1,...,hr_band_n

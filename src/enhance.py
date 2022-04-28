@@ -18,10 +18,40 @@ from torchaudio.functional import resample
 
 logger = logging.getLogger(__name__)
 
+
+def gibbs_inference(model, lr_sig, hr_sig, args):
+    """
+
+    :param model:
+    :param lr_sig:  [Batch-size, in_channels, Time]
+                    in_channels: lr channel, hr_band_1,...,hr_band_n, masks_sentinels
+    :param hr_sig:  [Batch-size, out_channels, Time]
+                    out_channels: hr_band_1,...,hr_band_n
+    :param args:
+    :return:
+    """
+    n_steps = args.experiment.n_gibbs_steps
+    n_bands = args.experiment.n_bands
+    lr_n_bands = args.experiment.lr_n_bands
+    with torch.no_grad():
+        lr_channel = lr_sig[:,0:lr_n_bands,:]
+        out = model(lr_sig, hr_sig.shape[-1])
+        for i in range(1, n_steps):
+            masks = torch.randint(high=2, size=(1, n_bands, 1), dtype=torch.float, device=args.device).expand_as(out)
+            flipped_masks = torch.zeros_like(masks)
+            flipped_masks[masks==0] = 1
+            next_input = torch.cat([lr_channel, masks * out, masks], dim=1)
+            tmp_out = model(next_input, hr_sig.shape[-1])
+            out = masks * out + flipped_masks * tmp_out
+    return out
+
+
+
 def get_estimate(model, lr_sig, hr_sig, args):
     torch.set_num_threads(1)
     with torch.no_grad():
-        out = model(lr_sig, hr_sig.shape[-1])
+        # out = model(lr_sig, hr_sig.shape[-1])
+        out = gibbs_inference(model, lr_sig, hr_sig, args)
         if 'experiment' in args and args.experiment.model == 'interponet':
             estimate = out['full_band']
         elif 'experiment' in args and args.experiment.model == 'interponet_2':
@@ -39,23 +69,26 @@ def write(wav, filename, sr):
     torchaudio.save(filename, wav.cpu(), sr)
 
 
-def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr):
+def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands):
     # Write result
     for lr, hr, pr, filename in zip(lr_sigs, hr_sigs, processed_sigs, filenames):
+        for i in range(hr.shape[0]):
+            write(hr[i:i+1, :], filename + f'_hr_{i}.wav', sr=hr_sr)
+            write(pr[i:i + 1,:], filename + f'_pr_{i}.wav', sr=hr_sr)
+
         hr = torch.sum(hr, keepdim=True, dim=0)
-        write(pr[0:1,:], filename + "_pr_1.wav", sr=hr_sr)
-        write(pr[1:2,:], filename + "_pr_2.wav", sr=hr_sr)
         pr = torch.sum(pr, keepdim=True, dim=0)
-        lr = lr[0:1,:]
+        lr = lr[0:lr_n_bands,:]
+        lr = torch.sum(lr, keepdim=True, dim=0)
         lr = resample(lr, hr_sr, lr_sr)
         write(lr, filename + "_lr.wav", sr=lr_sr)
         write(hr, filename + "_hr.wav", sr=hr_sr)
         write(pr, filename + "_pr.wav", sr=hr_sr)
 
 
-def _estimate_and_save(model, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args):
+def _estimate_and_save(model, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args, lr_n_bands):
     estimate = get_estimate(model, lr_sigs, hr_sigs, args)
-    save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr)
+    save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
 
 
 def enhance(dataloader, model, args):
@@ -64,6 +97,8 @@ def enhance(dataloader, model, args):
     os.makedirs(args.samples_dir, exist_ok=True)
     lr_sr = args.experiment.lr_sr if 'experiment' in args else args.lr_sr
     hr_sr = args.experiment.hr_sr if 'experiment' in args else args.hr_sr
+
+    lr_n_bands = args.experiment.lr_n_bands
 
     total_filenames = []
 
@@ -80,11 +115,11 @@ def enhance(dataloader, model, args):
             if args.device == 'cpu' and args.num_workers > 1:
                 pendings.append(
                     pool.submit(_estimate_and_save,
-                                model, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args))
+                                model, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args, lr_n_bands))
             else:
                 # Forward
                 estimate = get_estimate(model, lr_sigs, hr_sigs, args)
-                save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr)
+                save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
 
             if i == args.enhance_samples_limit:
                 break

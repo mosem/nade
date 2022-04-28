@@ -89,7 +89,7 @@ class PrHrSet(Dataset):
 
 class LrHrSet(Dataset):
     def __init__(self, json_dir, lr_sr, hr_sr, stride = None, segment = None,
-                 pad=True, with_path=False, n_bands=2):
+                 pad=True, with_path=False, test=False, n_bands=2, lr_n_bands=1):
         """__init__.
         :param json_dir: directory containing both hr.json and lr.json
         :param length: maximum sequence length
@@ -103,8 +103,11 @@ class LrHrSet(Dataset):
         self.lr_sr = lr_sr
         self.hr_sr = hr_sr
         self.with_path = with_path
+        self.test = test
         self.n_bands = n_bands
+        self.lr_n_bands = lr_n_bands
         self.hr_augment = Augment(self.hr_sr, self.n_bands)
+        self.lr_augment = Augment(self.lr_sr, self.lr_n_bands)
         lr_json = os.path.join(json_dir, 'lr.json')
         hr_json = os.path.join(json_dir, 'hr.json')
         with open(lr_json, 'r') as f:
@@ -136,11 +139,21 @@ class LrHrSet(Dataset):
 
         lr_sig = resample(lr_sig, self.lr_sr, self.hr_sr)
 
-        hr_sig = self.hr_augment(hr_sig)
+        lr_sig = self.lr_augment(lr_sig)
 
-        masks = torch.zeros_like(hr_sig)
-        lr_sig = torch.cat([lr_sig, hr_sig, masks], dim=0)
+        hr_sig = self.hr_augment(hr_sig)
+        if self.test:
+            masks = torch.zeros_like(hr_sig)
+        else:
+            masks = torch.randint(high=2, size=(self.n_bands, 1), dtype=torch.float)
+            # make sure some channels are unmasked
+            while torch.all(masks==1):
+                masks = torch.randint(high=2, size=(self.n_bands, 1), dtype=torch.float)
+            masks = masks.expand_as(hr_sig)
+        masked_hr_sig = hr_sig*masks
+        lr_sig = torch.cat([lr_sig, masked_hr_sig, masks], dim=0)
         # lr_sig = torch.cat([lr_sig, hr_sig], dim=0)
+
 
         if self.with_path:
             return (lr_sig, lr_path), (hr_sig, hr_path)

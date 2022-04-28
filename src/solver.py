@@ -235,7 +235,7 @@ class Solver(object):
                 self.model.eval()
                 with torch.no_grad():
                     valid_losses = self._run_one_epoch(epoch, cross_valid=True)
-                evaluation_loss = valid_losses['generator']
+                evaluation_loss = valid_losses['total']
                 logger_msg = f'Validation Summary | End of Epoch {epoch + 1} | Time {time.time() - start:.2f}s | ' \
                              + ' | '.join([f'{k} Valid Loss {v:.5f}' for k, v in valid_losses.items()])
                 logger.info(bold(logger_msg))
@@ -298,7 +298,8 @@ class Solver(object):
 
 
     def _run_one_epoch(self, epoch, cross_valid=False):
-
+        n_bands = self.args.experiment.n_bands
+        total_losses = [{'wav': [], 'stft': []} for j in range(n_bands)]
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
 
         # get a different order for distributed training, otherwise this will get ignored
@@ -309,69 +310,111 @@ class Solver(object):
         logprog = LogProgress(logger, data_loader, updates=self.num_prints, name=name)
         for i, data in enumerate(logprog):
             lr, hr_bands = [x.to(self.device) for x in data]
+            masks = lr[:,-n_bands:,:]
+
+            # logger.info(f'lr shape: {lr.shape}, hr_bands shape: {hr_bands.shape}, masks shape: {masks.shape}')
 
             # masks = torch.zeros_like(hr_bands)
             # input = torch.cat([lr, hr_bands,masks],dim=1)
 
             pr = self.dmodel(lr, hr_bands.shape[-1])
 
-            # logger.info(f'lr shape: {lr.shape}, hr_bands shape: {hr_bands.shape}, pr shape: {pr.shape}')
-
             if self.adversarial_mode:
                 if self.args.experiment.discriminator_model == 'hifi':
-                    total_loss, discriminator_loss = self._get_hifi_adversarial_loss(hr_bands, pr)
+                    generator_loss, discriminator_loss = self._get_hifi_adversarial_loss(hr_bands, pr)
                 else:
-                    total_loss, discriminator_loss = self._get_melgan_adversarial_loss(hr_bands, pr)
+                    generator_loss, discriminator_loss = self._get_melgan_adversarial_loss(hr_bands, pr)
             else:
-                loss, stft_loss = self._get_loss(hr_bands, pr)
-                total_loss = loss + stft_loss
+                losses = self._get_loss(hr_bands, pr, masks)
+
+            all_channels_wav_loss = sum(loss['wav'].item() for loss in losses if loss['wav'])
+            all_channels_stft_loss = sum(loss['stft'].item() for loss in losses if loss['stft'])
+            all_channels_total_loss = all_channels_wav_loss + all_channels_stft_loss
+            # logger.info(f'masks: {masks[0, :, 0]}, losses: {losses}')
+            # logger.info(f'total_diff_loss: {total_stft_loss}, total_diff_loss: {total_diff_loss}')
 
             # optimize model in training mode
             if not cross_valid:
-                self._optimize(total_loss, pyramid_losses=None)
+                self._optimize(losses)
                 if self.disc_optimizer is not None:
                     self._optimize_adversarial(discriminator_loss)
 
-            logprog.update(loss=format(total_loss / (i + 1), ".5f"))
+            for j, loss in enumerate(losses):
+                if loss['wav']:
+                    total_losses[j]['wav'].append(loss['wav'].item())
+                if loss['stft']:
+                    total_losses[j]['stft'].append(loss['stft'].item())
+
+            losses_log = {'total_loss': format(all_channels_total_loss / (i + 1), ".5f"),
+                          'wav_loss': format(all_channels_wav_loss / (i + 1), ".5f"),
+                          'stft_loss': format(all_channels_stft_loss / (i + 1), ".5f")}
+            for j, loss in enumerate(losses):
+                avg_wav_loss_j = sum(total_losses[j]['wav']) / len(total_losses[j]['wav']) \
+                                                                            if len(total_losses[j]['wav']) else 0
+                avg_stft_loss_j = sum(total_losses[j]['stft']) / len(total_losses[j]['stft']) \
+                                                                            if len(total_losses[j]['stft']) else 0
+                losses_log.update({f'wav_{j}_loss': format(avg_wav_loss_j, ".5f")})
+                losses_log.update({f'stft_{j}_loss': format(avg_stft_loss_j, ".5f")})
+            logprog.update(**losses_log)
+
             # Just in case, clear some memory
             del pr, lr, hr_bands
 
-        avg_losses = {'generator': total_loss.item() / (i + 1)}
+        avg_losses = {}
+        all_channels_wav_loss = 0
+        all_channels_stft_loss = 0
+        for j in range(len(total_losses)):
+            avg_wav_loss_j = sum(total_losses[j]['wav']) / len(total_losses[j]['wav']) \
+                                                                if len(total_losses[j]['wav']) else 0
+            avg_stft_loss_j = sum(total_losses[j]['stft']) / len(total_losses[j]['stft']) \
+                                                                if len(total_losses[j]['stft']) else 0
+            avg_losses.update({f'wav_{j}': avg_wav_loss_j})
+            avg_losses.update({f'stft_{j}': avg_stft_loss_j})
+            all_channels_wav_loss += avg_wav_loss_j
+            all_channels_stft_loss += avg_stft_loss_j
+        all_channels_wav_loss /= len(total_losses)
+        all_channels_stft_loss /= len(total_losses)
+        all_channels_total_loss = all_channels_wav_loss + all_channels_stft_loss
+        avg_losses.update({'avg_wav': all_channels_wav_loss})
+        avg_losses.update({'avg_stft': all_channels_stft_loss})
+        avg_losses.update({'total': all_channels_total_loss})
         if self.adversarial_mode:
             avg_losses.update({'discriminator': discriminator_loss.item() / (i + 1)})
-        else:
-            avg_losses.update({'l1': loss.item() / (i + 1), 'stft': stft_loss.item() / (i + 1)})
         return avg_losses
 
 
-    def _get_loss(self, hr, pr):
-        loss = 0
-        stft_loss = 0
-        hr = torch.sum(hr, keepdim=True, dim=1)
-        pr = torch.sum(pr, keepdim=True, dim=1)
-        with torch.autograd.set_detect_anomaly(True):
-            if self.args.loss == '':
-                pass
-            elif self.args.loss == 'l1':
-                loss = F.l1_loss(hr, pr)
-            elif self.args.loss == 'l2':
-                loss = F.mse_loss(hr, pr)
-            elif self.args.loss == 'sisnr':
-                loss = self.sisnrloss(hr.squeeze(dim=1), pr.squeeze(dim=1))
-            elif self.args.loss == 'stft_only':
-                pass
-            elif self.args.loss == 'charbonnier':
-                loss = self.charbonnier_loss(hr, pr)
-            else:
-                raise ValueError(f'Invalid loss {self.args.loss}')
-            # MultiResolution STFT loss
-            if self.args.stft_loss:
-                sc_loss, mag_loss = self.mrstftloss(pr.squeeze(1), hr.squeeze(1))
-                stft_loss = sc_loss + mag_loss
+    def _get_loss(self, hr, pr, masks):
+        n_losses = masks.shape[1]
+        losses = [{'wav': None, 'stft': None} for j in range(n_losses)]
+        # logger.info(f'hr shape: {hr.shape}, pr shape: {pr.shape}')
+        # hr = torch.sum(hr, keepdim=True, dim=1)
+        # pr = torch.sum(pr, keepdim=True, dim=1)
+        for i,mask_bit in enumerate(masks[0, :, 0]):
+            if mask_bit == 0:
+                hr_i = hr[:, i, :]
+                pr_i = pr[:, i, :]
+                with torch.autograd.set_detect_anomaly(True):
+                    if self.args.loss == '':
+                        pass
+                    elif self.args.loss == 'l1':
+                        loss = F.l1_loss(hr_i, pr_i)
+                    elif self.args.loss == 'l2':
+                        loss = F.mse_loss(hr_i, pr_i)
+                    elif self.args.loss == 'sisnr':
+                        loss = self.sisnrloss(hr_i.squeeze(dim=1), pr_i.squeeze(dim=1))
+                    elif self.args.loss == 'stft_only':
+                        pass
+                    elif self.args.loss == 'charbonnier':
+                        loss = self.charbonnier_loss(hr_i, pr_i)
+                    else:
+                        raise ValueError(f'Invalid loss {self.args.loss}')
+                    losses[i]['wav'] = loss
+                    # MultiResolution STFT loss
+                    if self.args.stft_loss:
+                        sc_loss_i, mag_loss_i = self.mrstftloss(hr_i.squeeze(1), pr_i.squeeze(1))
+                        losses[i]['stft'] = sc_loss_i + mag_loss_i
 
-
-
-        return loss, stft_loss
+        return losses
 
     def _get_melgan_adversarial_loss(self, hr, pr):
 
@@ -445,14 +488,16 @@ class Solver(object):
         return total_loss_generator, total_loss_discriminator
 
 
-    def _optimize(self, loss, pyramid_losses = None):
-        self.optimizer.zero_grad()
-        if pyramid_losses is not None:
-            for p_loss in pyramid_losses.values():
-                loss += p_loss
-                # p_loss.backward(retain_graph=True)
-        loss.backward()
-        self.optimizer.step()
+    def _optimize(self, losses):
+
+
+        total_diff_loss = sum(loss['wav'] for loss in losses if loss['wav'])
+        total_stft_loss = sum(loss['stft'] for loss in losses if loss['stft'])
+        total_loss = total_diff_loss + total_stft_loss
+        if total_loss != 0:
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            self.optimizer.step()
         # self.scheduler.step()
 
     def _optimize_adversarial(self, discriminator_loss):

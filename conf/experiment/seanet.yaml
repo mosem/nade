@@ -1,5 +1,5 @@
 # @package experiment
-name: ${dummy}seanet
+name: ${dummy}seanet,n_gibbs_steps:${experiment.n_gibbs_steps},n_bands:${experiment.n_bands}
 
 # Dataset related
 lr_sr: 8000 # low resolution sample rate, added to support BWE. Should be included in training cfg
@@ -19,7 +19,7 @@ seanet:
   normalize: False
   floor: 1e-3
   ratios: [ 8,8,2,2 ]
-  in_channels: 3
+  in_channels: 5
   out_channels: 2
   lr_sr: ${experiment.lr_sr}
   hr_sr: ${experiment.hr_sr}
@@ -36,3 +36,5 @@ discriminator:
   ndf: 16
 
 n_bands: 2
+lr_n_bands: 1
+n_gibbs_steps: 128

@@ -2,7 +2,9 @@
 import torch
 from torch import nn
 from torchaudio import sox_effects
+import logging
 
+logger = logging.getLogger(__name__)
 
 class Augment(nn.Module):
 
@@ -13,15 +15,16 @@ class Augment(nn.Module):
 
         eps = 1e-7
 
-        self.band_width = (sr/2) / n_bands - eps
-        self.bands = [(i * self.band_width, (i + 1) * self.band_width) for i in range(n_bands)]
+        self.band_width = (sr/2) / n_bands
+        self.bands = [[i * self.band_width, (i + 1) * self.band_width] for i in range(n_bands)]
+        self.bands[-1][-1] -= eps
 
         # self.band_reject_chains = []
 
         self.effects = []
 
         for band_start,band_end in self.bands:
-            self.effects.append([['sinc', '-a', '120', f'{band_end}-{band_start}']])
+            self.effects.append([['sinc', '-a', '120', f'{band_start}-{band_end}']])
             # self.band_reject_chains.append(augment.EffectChain().sinc('-a', '120', f'{band_end}-{band_start}'))
 
     def forward(self, x):

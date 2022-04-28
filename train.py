@@ -41,19 +41,22 @@ def run(args):
 
     # Building datasets and loaders
     tr_dataset = LrHrSet(args.dset.train, args.experiment.lr_sr, args.experiment.hr_sr,
-                         args.experiment.stride, args.experiment.segment)
+                         args.experiment.stride, args.experiment.segment,
+                         n_bands = args.experiment.n_bands, lr_n_bands=args.experiment.lr_n_bands)
     tr_loader = distrib.loader(tr_dataset, batch_size=args.experiment.batch_size, shuffle=True,
                                num_workers=args.num_workers)
     if args.dset.valid:
         cv_dataset = LrHrSet(args.dset.test, args.experiment.lr_sr, args.experiment.hr_sr,
-                             stride=None, segment=None)
+                             stride=None, segment=None,
+                             test=True, n_bands=args.experiment.n_bands, lr_n_bands=args.experiment.lr_n_bands)
         cv_loader = distrib.loader(cv_dataset, batch_size=1, shuffle=False, num_workers=args.num_workers)
     else:
         cv_loader = None
 
     if args.dset.test:
         tt_dataset = LrHrSet(args.dset.test, args.experiment.lr_sr, args.experiment.hr_sr,
-                             stride=None, segment=None, with_path=True)
+                             stride=None, segment=None, with_path=True,
+                             test=True, n_bands=args.experiment.n_bands, lr_n_bands=args.experiment.lr_n_bands)
         tt_loader = distrib.loader(tt_dataset, batch_size=1, shuffle=False, num_workers=args.num_workers)
     else:
         tt_loader = None

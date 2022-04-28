@@ -57,7 +57,7 @@ def create_results_df(args, data_loader, epoch):
 
         upsampled_lr = upsample_fn(lr)
         upsampled_lr = match_signal(upsampled_lr, hr.shape[-1])
-        logger.info(f'hr shape: {hr.shape}, upsampled_lr shape: {upsampled_lr.shape}')
+        # logger.info(f'hr shape: {hr.shape}, upsampled_lr shape: {upsampled_lr.shape}')
         lr_snr = get_snr(hr.numpy(), upsampled_lr.numpy()).item()
 
         df.loc[i] = [filename, lr_snr, pr_snr, pesq, stoi, lsd, sisnr, visqol]

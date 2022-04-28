@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import math
 from src.models.modules import ResnetBlock, WNConv1d, WNConvTranspose1d, weights_init
@@ -22,7 +23,9 @@ class Seanet(nn.Module):
                  out_channels=1,
                  lr_sr=16000,
                  hr_sr=16000,
-                 upsample=True):
+                 upsample=True,
+                 cumulative=False,
+                 n_out_bands=1):
         super().__init__()
 
         self.resample = resample
@@ -34,6 +37,8 @@ class Seanet(nn.Module):
         self.hr_sr = hr_sr
         self.scale_factor = int(self.hr_sr/self.lr_sr)
         self.upsample = upsample
+        self.cumulative = cumulative
+        self.n_out_bands = n_out_bands
 
         self.encoder = nn.ModuleList()
         self.decoder = nn.ModuleList()
@@ -97,12 +102,21 @@ class Seanet(nn.Module):
         ]
         self.encoder.insert(0, nn.Sequential(*encoder_wrapper_conv_layer))
 
-        decoder_wrapper_conv_layer = [
-            nn.LeakyReLU(0.2),
-            nn.ReflectionPad1d(3),
-            WNConv1d(ngf, out_channels, kernel_size=7, padding=0),
-            nn.Tanh(),
-        ]
+        if not self.cumulative:
+            decoder_wrapper_conv_layer = [
+                nn.LeakyReLU(0.2),
+                nn.ReflectionPad1d(3),
+                WNConv1d(ngf, out_channels, kernel_size=7, padding=0),
+                nn.Tanh(),
+            ]
+        else:
+            decoder_wrapper_conv_layer = [
+                nn.LeakyReLU(0.2),
+                nn.ReflectionPad1d(3),
+                WNConv1d(ngf, out_channels, kernel_size=7, padding=0),
+            ]
+            self.cumulative_layer = nn.Sequential(*[nn.LeakyReLU(0.2),WNConv1d(out_channels,1,kernel_size=1), nn.Tanh()])
+
         self.decoder.append(nn.Sequential(*decoder_wrapper_conv_layer))
 
         self.apply(weights_init)
@@ -147,6 +161,8 @@ class Seanet(nn.Module):
                     out_channels: hr_band_1,...,hr_band_n
         """
 
+        masks = signal[:, -self.n_out_bands:, :]
+
         target_len = signal.shape[-1]
         if self.upsample:
             target_len *= self.scale_factor
@@ -186,5 +202,16 @@ class Seanet(nn.Module):
         x = std * x
         x = x.view(x.size(0), self.out_channels, x.size(-1))
         # logger.info(f'end of seanet: {x.shape}')
-        return x
+
+        if self.cumulative:
+            x_place_holder = torch.zeros_like(x)
+            for i, mask_bit in enumerate(masks[0, :, 0]):
+                if mask_bit == 0:
+                    x_place_holder[:, i, :] = x[:, i, :]
+                else:
+                    x_place_holder[:, i, :] = x[:, i, :].detach()
+            x_cumulative = self.cumulative_layer(x_place_holder)
+            return x, x_cumulative
+        else:
+            return x
 

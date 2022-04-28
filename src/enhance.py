@@ -35,31 +35,44 @@ def gibbs_inference(model, lr_sig, hr_sig, args):
     lr_n_bands = args.experiment.lr_n_bands
     with torch.no_grad():
         lr_channel = lr_sig[:,0:lr_n_bands,:]
-        out = model(lr_sig, hr_sig.shape[-1])
+        if args.experiment.cumulative:
+            out, out_cumulative = model(lr_sig, hr_sig.shape[-1])
+        else:
+            out = model(lr_sig, hr_sig.shape[-1])
+        prev_out = out
+
         for i in range(1, n_steps):
-            masks = torch.randint(high=2, size=(1, n_bands, 1), dtype=torch.float, device=args.device).expand_as(out)
+            masks = torch.randint(high=2, size=(1, n_bands, 1), dtype=torch.float,
+                                  device=args.device).expand_as(prev_out)
             flipped_masks = torch.zeros_like(masks)
             flipped_masks[masks==0] = 1
-            next_input = torch.cat([lr_channel, masks * out, masks], dim=1)
-            tmp_out = model(next_input, hr_sig.shape[-1])
-            out = masks * out + flipped_masks * tmp_out
-    return out
+
+            tmp_masks = masks.detach().clone() # tmp masks is propagated via network and should not be used later
+            next_input = torch.cat([lr_channel, tmp_masks * prev_out, tmp_masks], dim=1)
+            if args.experiment.cumulative:
+                tmp_out, tmp_out_cumulative = model(next_input, hr_sig.shape[-1])
+            else:
+                tmp_out = model(next_input, hr_sig.shape[-1])
+
+            # combine channels from previous output and current output
+            prev_out = masks * prev_out + flipped_masks * tmp_out
+
+
+    # return tmp_out
+
+    if args.experiment.save_cumulative:
+        return (tmp_out, tmp_out_cumulative)
+    else:
+        return tmp_out
+
+    # return prev_out
 
 
 
 def get_estimate(model, lr_sig, hr_sig, args):
     torch.set_num_threads(1)
     with torch.no_grad():
-        # out = model(lr_sig, hr_sig.shape[-1])
-        out = gibbs_inference(model, lr_sig, hr_sig, args)
-        if 'experiment' in args and args.experiment.model == 'interponet':
-            estimate = out['full_band']
-        elif 'experiment' in args and args.experiment.model == 'interponet_2':
-            estimate = out[-1]
-        elif args.experiment.model == 'lapsrn':
-            estimate = out[-1]
-        else:
-            estimate = out
+        estimate = gibbs_inference(model, lr_sig, hr_sig, args)
     return estimate
 
 
@@ -69,16 +82,47 @@ def write(wav, filename, sr):
     torchaudio.save(filename, wav.cpu(), sr)
 
 
+def save_wavs_with_cumulative(pr_channels_sigs, pr_cumulative_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands):
+    # Write result
+    for lr, hr, pr_channels, pr, filename in zip(lr_sigs, hr_sigs, pr_channels_sigs, pr_cumulative_sigs, filenames):
+        lr = lr[0:lr_n_bands, :]
+        # logger.info(f'pr_channels shape: {pr_channels.shape}, pr shape: {pr.shape}, lr_shape: {lr.shape}')
+        for j in range(lr.shape[0]):
+            lr_j = resample(lr[j:j + 1, :], hr_sr, lr_sr)
+            # logger.info(f'lr_j shape: {lr_j.shape}')
+            write(lr_j, filename + f'_lr_{j}.wav', sr=lr_sr)
+
+        for i in range(hr.shape[0]):
+            write(hr[i:i + 1, :], filename + f'_hr_{i}.wav', sr=hr_sr)
+            write(pr_channels[i:i + 1, :], filename + f'_pr_{i}.wav', sr=hr_sr)
+
+        hr = torch.sum(hr, keepdim=True, dim=0)
+        pr_sum = torch.sum(pr_channels, keepdim=True, dim=0)
+        write(pr_sum, filename + "_pr_sum.wav", sr=hr_sr)
+
+        lr = torch.sum(lr, keepdim=True, dim=0)
+        lr = resample(lr, hr_sr, lr_sr)
+        write(lr, filename + "_lr.wav", sr=lr_sr)
+        write(hr, filename + "_hr.wav", sr=hr_sr)
+        write(pr, filename + "_pr.wav", sr=hr_sr)
+
+
+
 def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands):
     # Write result
     for lr, hr, pr, filename in zip(lr_sigs, hr_sigs, processed_sigs, filenames):
+        lr = lr[0:lr_n_bands, :]
+        for j in range(lr.shape[0]):
+            lr_j = resample(lr[j:j + 1, :], hr_sr, lr_sr)
+            write(lr_j, filename + f'_lr_{j}.wav', sr=lr_sr)
+
         for i in range(hr.shape[0]):
             write(hr[i:i+1, :], filename + f'_hr_{i}.wav', sr=hr_sr)
             write(pr[i:i + 1,:], filename + f'_pr_{i}.wav', sr=hr_sr)
 
         hr = torch.sum(hr, keepdim=True, dim=0)
         pr = torch.sum(pr, keepdim=True, dim=0)
-        lr = lr[0:lr_n_bands,:]
+
         lr = torch.sum(lr, keepdim=True, dim=0)
         lr = resample(lr, hr_sr, lr_sr)
         write(lr, filename + "_lr.wav", sr=lr_sr)
@@ -88,7 +132,12 @@ def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_ba
 
 def _estimate_and_save(model, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args, lr_n_bands):
     estimate = get_estimate(model, lr_sigs, hr_sigs, args)
-    save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
+    if args.experiment.save_cumulative:
+        estimate_channels, estimate_cumulative = estimate
+        save_wavs_with_cumulative(estimate_channels, estimate_cumulative, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr,
+                                  lr_n_bands)
+    else:
+        save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
 
 
 def enhance(dataloader, model, args):
@@ -119,7 +168,11 @@ def enhance(dataloader, model, args):
             else:
                 # Forward
                 estimate = get_estimate(model, lr_sigs, hr_sigs, args)
-                save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
+                if args.experiment.save_cumulative:
+                    estimate_channels, estimate_cumulative = estimate
+                    save_wavs_with_cumulative(estimate_channels, estimate_cumulative, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
+                else:
+                    save_wavs(estimate, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
 
             if i == args.enhance_samples_limit:
                 break

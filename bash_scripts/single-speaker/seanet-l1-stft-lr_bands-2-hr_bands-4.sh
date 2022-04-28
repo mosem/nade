@@ -16,4 +16,5 @@ python train.py \
   experiment.lr_n_bands=2 \
   experiment.seanet.in_channels=10 \
   experiment.seanet.out_channels=4 \
+  experiment.n_gibbs_steps=512 \
 

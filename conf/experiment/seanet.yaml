@@ -24,6 +24,7 @@ seanet:
   lr_sr: ${experiment.lr_sr}
   hr_sr: ${experiment.hr_sr}
   upsample: False
+  cumulative: ${experiment.cumulative}
 
 adversarial: True
 features_loss_lambda: 100
@@ -34,6 +35,9 @@ discriminator:
   num_D: 3
   downsampling_factor: 4
   ndf: 16
+
+cumulative: False
+save_cumulative: False
 
 n_bands: 2
 lr_n_bands: 1

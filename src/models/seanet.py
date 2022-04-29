@@ -175,11 +175,11 @@ class Seanet(nn.Module):
             mean = 0
             std = 1
         x = signal
-        # print(f'target_len: {target_len}')
-        # logger.info(f'beginning of seanet: {x.shape}')
+        print(f'target_len: {target_len}')
+        logger.info(f'beginning of seanet: {x.shape}')
         if self.upsample:
             x = resample(x,self.lr_sr, self.hr_sr)
-        # print(f'after resample: {x.shape}')
+        print(f'after resample: {x.shape}')
 
         x, padding_len = self.pad_to_valid_length(x)
         # print(f'after padding: {x.shape}, padding: {padding_len}')

@@ -9,7 +9,11 @@ from src.models.ebrn import EBRN
 from src.models.lapsrn import LapSrn
 from src.models.interponet_2 import Interponet_2
 from src.models.modules import Discriminator, MultiPeriodDiscriminator, MultiScaleDiscriminator
+from src.models.demucs_source_sep import DemucsSourceSep
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 def get_model(args):
     if args.experiment.model == 'sinc':
@@ -32,6 +36,8 @@ def get_model(args):
         generator = EBRN(**args.experiment.ebrn)
     elif args.experiment.model == 'lapsrn':
         generator = LapSrn(**args.experiment.lapsrn)
+    elif args.experiment.model == 'demcus_source_sep':
+        generator = DemucsSourceSep(**args.experiment.demucs_source_sep)
 
 
     models = {'generator': generator}

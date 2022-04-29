@@ -1,0 +1,39 @@
+# @package experiment
+name: ${dummy}demucs,n_gibbs_steps:${experiment.n_gibbs_steps},n_bands:${experiment.n_bands}
+
+# Dataset related
+lr_sr: 8000 # low resolution sample rate, added to support BWE. Should be included in training cfg
+hr_sr: 16000 # high resolution sample rate. Should be included in training cfg
+segment: 2
+stride: 2    # in seconds, how much to stride between training examples
+pad: true   # if training sample is too short, pad it
+batch_size: 16
+
+# models related
+model: demcus_source_sep
+demucs_source_sep:
+  in_channels: 5
+  out_channels: 2
+  channels: 64
+  depth: 6
+  rewrite: True
+  glu: True
+  rescale: 0.1
+  resample: False
+  kernel_size: 8
+  stride: 4
+  growth: 2
+  lstm_layers: 2
+  context: 3
+  normalize: False
+  lr_sr: ${experiment.lr_sr}
+  hr_sr: ${experiment.hr_sr}
+  upsample: True
+  cumulative: ${experiment.cumulative}
+
+cumulative: False
+save_cumulative: False
+
+n_bands: 2
+lr_n_bands: 1
+n_gibbs_steps: 128

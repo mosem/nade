@@ -168,7 +168,7 @@ class Demucs(nn.Module):
         x, padding_len = self.pad_to_valid_length(x)
 
         if self.resample > 1:
-            x = resample(x, self.lr_sr, self.resample*self.lr_sr)
+            x = resample(x, self.hr_sr, self.resample*self.hr_sr)
 
         skips = []
         for encode in self.encoder:
@@ -181,7 +181,7 @@ class Demucs(nn.Module):
             x = decode(x)
 
         if self.resample > 1:
-            x = resample(x, self.resample * self.lr_sr, self.lr_sr)
+            x = resample(x, self.resample * self.hr_sr, self.hr_sr)
 
         if hr_len and hr_len < x.shape[-1]:
             x = x[..., :hr_len]

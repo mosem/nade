@@ -19,6 +19,16 @@ from torchaudio.functional import resample
 logger = logging.getLogger(__name__)
 
 
+def get_random_mask(n_bands, device, t, T):
+    p_max = 1.0
+    p_min = 0.0
+    alpha = 0.95
+    p = max(p_min, p_max - (t - 1) * (p_max - p_min) / (alpha * (T - 1)))
+    masks = torch.rand(size=(1, n_bands, 1), dtype=torch.float,
+                          device=device)
+    return (masks>p).int()
+
+
 def gibbs_inference(model, lr_sig, hr_sig, args):
     """
 
@@ -42,8 +52,7 @@ def gibbs_inference(model, lr_sig, hr_sig, args):
         prev_out = out
 
         for i in range(1, n_steps):
-            masks = torch.randint(high=2, size=(1, n_bands, 1), dtype=torch.float,
-                                  device=args.device).expand_as(prev_out)
+            masks = get_random_mask(n_bands,args.device,i,n_steps).expand_as(prev_out)
             flipped_masks = torch.zeros_like(masks)
             flipped_masks[masks==0] = 1
 
@@ -53,6 +62,8 @@ def gibbs_inference(model, lr_sig, hr_sig, args):
                 tmp_out, tmp_out_cumulative = model(next_input, hr_sig.shape[-1])
             else:
                 tmp_out = model(next_input, hr_sig.shape[-1])
+
+            logger.info(f'{i}) masks: {masks[0, :, 0]}, binary?: {torch.all(sum(masks == 1, masks == 0)).item()}')
 
             # combine channels from previous output and current output
             prev_out = masks * prev_out + flipped_masks * tmp_out

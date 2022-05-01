@@ -63,7 +63,7 @@ def gibbs_inference(model, lr_sig, hr_sig, args):
             else:
                 tmp_out = model(next_input, hr_sig.shape[-1])
 
-            logger.info(f'{i}) masks: {masks[0, :, 0]}, binary?: {torch.all(sum(masks == 1, masks == 0)).item()}')
+            # logger.info(f'{i}) masks: {masks[0, :, 0]}, binary?: {torch.all(sum(masks == 1, masks == 0)).item()}')
 
             # combine channels from previous output and current output
             prev_out = masks * prev_out + flipped_masks * tmp_out

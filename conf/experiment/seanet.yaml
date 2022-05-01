@@ -26,7 +26,7 @@ seanet:
   upsample: False
   cumulative: ${experiment.cumulative}
 
-adversarial: True
+adversarial: False
 features_loss_lambda: 100
 discriminator_model: melgan #melgan/hifi
 discriminator:

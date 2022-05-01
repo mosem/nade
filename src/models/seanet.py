@@ -179,7 +179,7 @@ class Seanet(nn.Module):
         logger.info(f'beginning of seanet: {x.shape}')
         if self.upsample:
             x = resample(x,self.lr_sr, self.hr_sr)
-        print(f'after resample: {x.shape}')
+        logger.info(f'after resample: {x.shape}')
 
         x, padding_len = self.pad_to_valid_length(x)
         # print(f'after padding: {x.shape}, padding: {padding_len}')
@@ -201,7 +201,7 @@ class Seanet(nn.Module):
         # print(f'end of seanet: {x.shape}')
         x = std * x
         x = x.view(x.size(0), self.out_channels, x.size(-1))
-        # logger.info(f'end of seanet: {x.shape}')
+        logger.info(f'end of seanet: {x.shape}')
 
         if self.cumulative:
             x_place_holder = torch.zeros_like(x)

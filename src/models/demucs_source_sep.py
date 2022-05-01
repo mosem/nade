@@ -10,6 +10,7 @@ from torchaudio.functional import resample
 from torch import nn
 
 from src.utils import capture_init, center_trim
+from torch.nn import functional as F
 
 import logging
 
@@ -54,7 +55,7 @@ class DemucsSourceSep(nn.Module):
                  rewrite=True,
                  glu=True,
                  rescale=0.1,
-                 resample=True,
+                 resample=False,
                  kernel_size=8,
                  stride=4,
                  growth=2.,
@@ -63,7 +64,7 @@ class DemucsSourceSep(nn.Module):
                  normalize=False,
                  lr_sr=16000,
                  hr_sr=16000,
-                 upsample=True,
+                 upsample=False,
                  cumulative=False):
         """
         Args:
@@ -165,17 +166,20 @@ class DemucsSourceSep(nn.Module):
         For training, extracts should have a valid length.For evaluation
         on full tracks we recommend passing `pad = True` to :method:`forward`.
         """
-        if self.resample:
-            length *= 2
-        for _ in range(self.depth):
+        # if self.resample:
+        #     length *= 2
+        for i in range(self.depth):
+            # logger.info(f'{i}: {length}')
             length = math.ceil((length - self.kernel_size) / self.stride) + 1
             length = max(1, length)
             length += self.context - 1
-        for _ in range(self.depth):
+        for j in range(self.depth):
+            # logger.info(f'{j}: {length}')
             length = (length - 1) * self.stride + self.kernel_size
 
-        if self.resample:
-            length = math.ceil(length / 2)
+        # if self.resample:
+        #     length = math.ceil(length / 2)
+        # logger.info(f'final: {length}')
         return int(length)
 
     def pad_to_valid_length(self, signal):
@@ -186,11 +190,15 @@ class DemucsSourceSep(nn.Module):
 
     def forward(self, mix, hr_len=None):
         x = mix
-        print(f'beginning of demucs: {x.shape}')
+        # logger.info(f'beginning of demucs: {x.shape}')
 
         target_len = x.shape[-1]
         if self.upsample:
             target_len *= self.scale_factor
+
+        if self.resample:
+            target_len *= 2
+
         if self.normalize:
             mono = mix.mean(dim=1, keepdim=True)
             mean = mono.mean(dim=-1, keepdim=True)
@@ -200,24 +208,38 @@ class DemucsSourceSep(nn.Module):
             std = 1
 
         x = (x - mean) / (1e-5 + std)
+        if self.resample:
+            x = resample(x, self.hr_sr, self.hr_sr*2)
+            # logger.info(f'after resample: {x.shape}')
 
-        x = resample(x, self.lr_sr, self.hr_sr)
 
+        x, padding_len = self.pad_to_valid_length(x)
 
+        # logger.info(f'after padding: {x.shape}, padding: {padding_len}')
 
         saved = []
         for encode in self.encoder:
+            # logger.info(f'encode: {x.shape[-1]}')
             x = encode(x)
             saved.append(x)
         if self.lstm:
             x = self.lstm(x)
         for decode in self.decoder:
+            # logger.info(f'decode: {x.shape[-1]}')
             skip = center_trim(saved.pop(-1), x)
             x = x + skip
             x = decode(x)
 
-        print(f'end of demucs: {x.shape}')
+        # logger.info(f'end of demucs: {x.shape}')
+        if target_len < x.shape[-1]:
+            x = x[..., :target_len]
+
+        # logger.info(f'before resample: {x.shape}')
+        if self.resample:
+            x = resample(x, self.hr_sr * 2, self.hr_sr)
+            # logger.info(f'after resample: {x.shape}')
+
         x = x * std + mean
         x = x.view(x.size(0), self.out_channels, x.size(-1))
-        print(f'end end of demucs: {x.shape}')
+        # logger.info(f'end end of demucs: {x.shape}')
         return x

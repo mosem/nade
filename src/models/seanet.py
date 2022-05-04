@@ -46,20 +46,24 @@ class Seanet(nn.Module):
         self.ratios = ratios
         mult = int(2 ** len(ratios))
 
+        n_groups = self.out_channels
+
         decoder_wrapper_conv_layer = [
             nn.LeakyReLU(0.2),
             nn.ReflectionPad1d(3),
-            WNConv1d(latent_space_size, mult * ngf, kernel_size=7, padding=0),
+            WNConv1d(latent_space_size, mult * ngf, kernel_size=7, padding=0, groups=n_groups),
         ]
 
         encoder_wrapper_conv_layer = [
             nn.LeakyReLU(0.2),
             nn.ReflectionPad1d(3),
-            WNConv1d(mult * ngf, latent_space_size, kernel_size=7, padding=0)
+            WNConv1d(mult * ngf, latent_space_size, kernel_size=7, padding=0, groups=n_groups)
         ]
 
         self.encoder.insert(0, nn.Sequential(*encoder_wrapper_conv_layer))
         self.decoder.append(nn.Sequential(*decoder_wrapper_conv_layer))
+
+
 
         for i, r in enumerate(ratios):
             encoder_block = [
@@ -69,6 +73,7 @@ class Seanet(nn.Module):
                          kernel_size=r * 2,
                          stride=r,
                          padding=r // 2 + r % 2,
+                         groups = n_groups,
                          ),
             ]
 
@@ -81,6 +86,7 @@ class Seanet(nn.Module):
                     stride=r,
                     padding=r // 2 + r % 2,
                     output_padding=r % 2,
+                    groups = n_groups,
                 ),
             ]
 
@@ -106,16 +112,17 @@ class Seanet(nn.Module):
             decoder_wrapper_conv_layer = [
                 nn.LeakyReLU(0.2),
                 nn.ReflectionPad1d(3),
-                WNConv1d(ngf, out_channels, kernel_size=7, padding=0),
+                WNConv1d(ngf, out_channels, kernel_size=7, padding=0, groups=n_groups),
                 nn.Tanh(),
             ]
         else:
             decoder_wrapper_conv_layer = [
                 nn.LeakyReLU(0.2),
                 nn.ReflectionPad1d(3),
-                WNConv1d(ngf, out_channels, kernel_size=7, padding=0),
+                WNConv1d(ngf, out_channels, kernel_size=7, padding=0, groups=n_groups),
             ]
-            self.cumulative_layer = nn.Sequential(*[nn.LeakyReLU(0.2),WNConv1d(out_channels,1,kernel_size=1), nn.Tanh()])
+            self.cumulative_layer = nn.Sequential(*[nn.LeakyReLU(0.2),WNConv1d(out_channels,1,kernel_size=1,
+                                                                               groups=n_groups), nn.Tanh()])
 
         self.decoder.append(nn.Sequential(*decoder_wrapper_conv_layer))
 
@@ -175,11 +182,10 @@ class Seanet(nn.Module):
             mean = 0
             std = 1
         x = signal
-        print(f'target_len: {target_len}')
-        logger.info(f'beginning of seanet: {x.shape}')
+        # logger.info(f'beginning of seanet: {x.shape}')
         if self.upsample:
             x = resample(x,self.lr_sr, self.hr_sr)
-        logger.info(f'after resample: {x.shape}')
+        # logger.info(f'after resample: {x.shape}')
 
         x, padding_len = self.pad_to_valid_length(x)
         # print(f'after padding: {x.shape}, padding: {padding_len}')
@@ -201,7 +207,7 @@ class Seanet(nn.Module):
         # print(f'end of seanet: {x.shape}')
         x = std * x
         x = x.view(x.size(0), self.out_channels, x.size(-1))
-        logger.info(f'end of seanet: {x.shape}')
+        # logger.info(f'end of seanet: {x.shape}')
 
         if self.cumulative:
             x_place_holder = torch.zeros_like(x)

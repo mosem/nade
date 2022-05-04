@@ -1,5 +1,5 @@
 # @package experiment
-name: ${dummy}seanet,n_gibbs_steps:${experiment.n_gibbs_steps},n_bands:${experiment.n_bands}
+name: ${dummy}seanet,n_gibbs_steps:${experiment.n_gibbs_steps},lr_bands:${experiment.lr_n_bands},hr_bands:${experiment.n_bands}
 
 # Dataset related
 lr_sr: 8000 # low resolution sample rate, added to support BWE. Should be included in training cfg

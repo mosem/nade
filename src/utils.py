@@ -6,6 +6,9 @@ import cv2
 
 from contextlib import contextmanager
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 def center_trim(tensor, reference):
     """
@@ -103,8 +106,26 @@ class LogProgress:
         self.logger.log(self.level, out)
 
 
+def scale_minmax(X, min=0.0, max=1.0):
+    isnan = np.isnan(X).any()
+    isinf = np.isinf(X).any()
+    if isinf:
+        X[X==np.inf] = 1e9
+        X[X==-np.inf] = 1e-9
+    if isnan:
+        X[X == np.nan] = 1e-9
+    # logger.info(f'isnan: {isnan}, isinf: {isinf}, max: {X.max()}, min: {X.min()}')
+
+    X_std = (X - X.min()) / (X.max() - X.min())
+    X_scaled = X_std * (max - min) + min
+    return X_scaled
+
 def convert_spectrogram_to_heatmap(spectrogram):
-    spectrogram = (255 * (spectrogram - np.min(spectrogram)) / np.ptp(spectrogram)).astype(np.uint8).squeeze()
+    spectrogram += 1e-9
+    spectrogram = scale_minmax(spectrogram, 0, 255).astype(np.uint8).squeeze()
+    spectrogram = np.flip(spectrogram, axis=0)
+    spectrogram = 255 - spectrogram
+    # spectrogram = (255 * (spectrogram - np.min(spectrogram)) / np.ptp(spectrogram)).astype(np.uint8).squeeze()[::-1,:]
     heatmap = cv2.applyColorMap(spectrogram, cv2.COLORMAP_INFERNO)
     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
     return heatmap

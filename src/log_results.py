@@ -48,7 +48,7 @@ def create_results_df(args, data_loader, epoch):
                                RESULTS_DF_STOI, RESULTS_DF_LSD, RESULTS_DF_SISNR, RESULTS_DF_VISQOL])
     upsample_fn = transforms.Resample(args.experiment.lr_sr, args.experiment.hr_sr)
     for i, data in enumerate(data_loader):
-        lr, hr, pr, filename = data
+        lr, hr, pr, pr_bands, hr_bands, filename = data
         filename = filename[0]
         # logger.info(f'hr shape: {hr.shape}, pr shape: {pr.shape}')
         # hr = torch.sum(hr, keepdim=True, dim=1)

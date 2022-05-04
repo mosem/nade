@@ -235,7 +235,9 @@ class Solver(object):
                 self.model.eval()
                 with torch.no_grad():
                     valid_losses = self._run_one_epoch(epoch, cross_valid=True)
-                if self.args.experiment.cumulative:
+                if self.adversarial_mode:
+                    evaluation_loss = valid_losses['all_channels_avg_generator']
+                elif self.args.experiment.cumulative:
                     evaluation_loss = valid_losses['cumulative_total']
                 else:
                     evaluation_loss = valid_losses['all_channels_total']
@@ -302,8 +304,8 @@ class Solver(object):
 
     def _run_one_epoch(self, epoch, cross_valid=False):
         n_bands = self.args.experiment.n_bands
-        total_channels_losses = [{'wav': [], 'stft': []} for j in range(n_bands)]
-        total_cumulative_losses = {'wav': 0, 'stft': 0}
+        total_channels_losses = [{'generator': [], 'discriminator': []} for j in range(n_bands)] if self.adversarial_mode else [{'wav': [], 'stft': []} for j in range(n_bands)]
+        total_cumulative_losses = {'wav': 0, 'stft': 0} if self.args.experiment.cumulative else None
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
 
         # get a different order for distributed training, otherwise this will get ignored
@@ -327,66 +329,118 @@ class Solver(object):
                 pr = self.dmodel(lr, hr_bands.shape[-1])
 
             if self.adversarial_mode:
-                if self.args.experiment.discriminator_model == 'hifi':
-                    generator_loss, discriminator_loss = self._get_hifi_adversarial_loss(hr_bands, pr)
-                else:
-                    generator_loss, discriminator_loss = self._get_melgan_adversarial_loss(hr_bands, pr)
+                channel_losses = self._get_adversarial_losses(hr_bands, pr, masks)
             else:
-                losses = self._get_loss(hr_bands, pr, masks)
-
-            all_channels_wav_loss = sum(loss['wav'].item() for loss in losses if loss['wav'])
-            all_channels_stft_loss = sum(loss['stft'].item() for loss in losses if loss['stft'])
-            all_channels_total_loss = all_channels_wav_loss + all_channels_stft_loss
-            # logger.info(f'masks: {masks[0, :, 0]}, losses: {losses}')
-            # logger.info(f'total_diff_loss: {total_stft_loss}, total_diff_loss: {total_diff_loss}')
+                channel_losses = self._get_loss(hr_bands, pr, masks)
 
             if self.args.experiment.cumulative:
                 cumulative_loss = self._get_cumulative_loss(hr_bands, pr_cumulative)
-                total_cumulative_losses['wav'] += cumulative_loss['wav'].item()
-                total_cumulative_losses['stft'] += cumulative_loss['stft'].item()
-                losses.append(cumulative_loss)
+            else:
+                cumulative_loss = None
 
             # optimize model in training mode
             if not cross_valid:
-                self._optimize(losses)
-                if self.disc_optimizer is not None:
-                    self._optimize_adversarial(discriminator_loss)
+                if self.adversarial_mode:
+                    self._optimize_adversarial(channel_losses)
+                else:
+                    if self.args.experiment.cumulative:
+                        self._optimize(channel_losses + [cumulative_loss])
+                    else:
+                        self._optimize(channel_losses)
 
-            for j in range(n_bands):
-                loss = losses[j]
-                if loss['wav']:
-                    total_channels_losses[j]['wav'].append(loss['wav'].item())
-                if loss['stft']:
-                    total_channels_losses[j]['stft'].append(loss['stft'].item())
+            if self.adversarial_mode:
+                losses_log = self._get_adversarial_losses_log(channel_losses, total_channels_losses, i)
+            else:
+                losses_log = self._get_wav_stft_losses_log(channel_losses, total_channels_losses, total_cumulative_losses, i, cumulative_loss)
 
-            losses_log = {'total_loss': format(all_channels_total_loss / (i + 1), ".5f"),
-                          'wav_channels_loss': format(all_channels_wav_loss / (i + 1), ".5f"),
-                          'stft_channels_loss': format(all_channels_stft_loss / (i + 1), ".5f")}
-
-            if self.args.experiment.cumulative:
-                losses_log.update({'wav_cumulative_loss': format(cumulative_loss['wav'].item() / (i + 1), ".5f"),
-                                   'stft_cumulative_loss': format(cumulative_loss['stft'].item() / (i + 1), ".5f")})
-
-            for j in range(n_bands):
-                avg_wav_loss_j = sum(total_channels_losses[j]['wav']) / len(total_channels_losses[j]['wav']) \
-                                                                            if len(total_channels_losses[j]['wav']) else 0
-                avg_stft_loss_j = sum(total_channels_losses[j]['stft']) / len(total_channels_losses[j]['stft']) \
-                                                                            if len(total_channels_losses[j]['stft']) else 0
-                losses_log.update({f'wav_{j}_loss': format(avg_wav_loss_j, ".5f")})
-                losses_log.update({f'stft_{j}_loss': format(avg_stft_loss_j, ".5f")})
             logprog.update(**losses_log)
 
             # Just in case, clear some memory
             del pr, lr, hr_bands
 
+        if self.adversarial_mode:
+            avg_losses = self._get_adversarial_avg_losses(total_channels_losses)
+        else:
+            avg_losses = self._get_wav_stft_avg_losses(total_channels_losses, i, total_cumulative_losses)
+
+
+        return avg_losses
+
+
+    def _get_wav_stft_losses_log(self, channel_losses, total_channels_losses, total_cumulative_losses, i, cumulative_loss=None):
+        n_bands = self.args.experiment.n_bands
+
+        all_channels_wav_loss = sum(loss['wav'].item() for loss in channel_losses if loss['wav'])
+        all_channels_stft_loss = sum(loss['stft'].item() for loss in channel_losses if loss['stft'])
+        all_channels_total_loss = all_channels_wav_loss + all_channels_stft_loss
+
+        if cumulative_loss:
+            total_cumulative_losses['wav'] += cumulative_loss['wav'].item()
+            total_cumulative_losses['stft'] += cumulative_loss['stft'].item()
+            channel_losses.append(cumulative_loss)
+
+        for j in range(n_bands):
+            loss = channel_losses[j]
+            if loss['wav']:
+                total_channels_losses[j]['wav'].append(loss['wav'].item())
+            if loss['stft']:
+                total_channels_losses[j]['stft'].append(loss['stft'].item())
+
+        losses_log = {'total_loss': format(all_channels_total_loss / (i + 1), ".5f"),
+                      'wav_channels_loss': format(all_channels_wav_loss / (i + 1), ".5f"),
+                      'stft_channels_loss': format(all_channels_stft_loss / (i + 1), ".5f")}
+
+        if self.args.experiment.cumulative:
+            losses_log.update({'wav_cumulative_loss': format(cumulative_loss['wav'].item() / (i + 1), ".5f"),
+                               'stft_cumulative_loss': format(cumulative_loss['stft'].item() / (i + 1), ".5f")})
+
+        for j in range(n_bands):
+            avg_wav_loss_j = sum(total_channels_losses[j]['wav']) / len(total_channels_losses[j]['wav']) \
+                if len(total_channels_losses[j]['wav']) else 0
+            avg_stft_loss_j = sum(total_channels_losses[j]['stft']) / len(total_channels_losses[j]['stft']) \
+                if len(total_channels_losses[j]['stft']) else 0
+            losses_log.update({f'wav_{j}_loss': format(avg_wav_loss_j, ".5f")})
+            losses_log.update({f'stft_{j}_loss': format(avg_stft_loss_j, ".5f")})
+
+        return losses_log
+
+
+    def _get_adversarial_losses_log(self, channel_losses, total_channels_losses, i):
+        n_bands = self.args.experiment.n_bands
+
+        all_channels_generator_loss = sum(loss['generator'].item() for loss in channel_losses if loss['generator'])
+        all_channels_discriminator_loss = sum(loss['discriminator'].item() for loss in channel_losses if loss['discriminator'])
+
+        for j in range(n_bands):
+            loss = channel_losses[j]
+            if loss['generator']:
+                total_channels_losses[j]['generator'].append(loss['generator'].item())
+            if loss['discriminator']:
+                total_channels_losses[j]['discriminator'].append(loss['discriminator'].item())
+
+        losses_log = {'generator_channels_loss': format(all_channels_generator_loss / (i + 1), ".5f"),
+                      'discriminator_channels_loss': format(all_channels_discriminator_loss / (i + 1), ".5f")}
+
+        for j in range(n_bands):
+            avg_gen_loss_j = sum(total_channels_losses[j]['generator']) / len(total_channels_losses[j]['generator']) \
+                if len(total_channels_losses[j]['generator']) else 0
+            avg_disc_loss_j = sum(total_channels_losses[j]['discriminator']) / len(total_channels_losses[j]['discriminator']) \
+                if len(total_channels_losses[j]['discriminator']) else 0
+            losses_log.update({f'generator_{j}_loss': format(avg_gen_loss_j, ".5f")})
+            losses_log.update({f'discriminator_{j}_loss': format(avg_disc_loss_j, ".5f")})
+
+        return losses_log
+
+
+    def _get_wav_stft_avg_losses(self, total_channels_losses, i, total_cumulative_losses=None):
         avg_losses = {}
         all_channels_wav_loss = 0
         all_channels_stft_loss = 0
         for j in range(len(total_channels_losses)):
             avg_wav_loss_j = sum(total_channels_losses[j]['wav']) / len(total_channels_losses[j]['wav']) \
-                                                                if len(total_channels_losses[j]['wav']) else 0
+                if len(total_channels_losses[j]['wav']) else 0
             avg_stft_loss_j = sum(total_channels_losses[j]['stft']) / len(total_channels_losses[j]['stft']) \
-                                                                if len(total_channels_losses[j]['stft']) else 0
+                if len(total_channels_losses[j]['stft']) else 0
             avg_losses.update({f'wav_{j}': avg_wav_loss_j})
             avg_losses.update({f'stft_{j}': avg_stft_loss_j})
             all_channels_wav_loss += avg_wav_loss_j
@@ -395,22 +449,40 @@ class Solver(object):
         all_channels_stft_loss /= len(total_channels_losses)
         all_channels_total_loss = all_channels_wav_loss + all_channels_stft_loss
 
-
         avg_losses.update({'all_channels_avg_wav': all_channels_wav_loss})
         avg_losses.update({'all_channels_avg_stft': all_channels_stft_loss})
         avg_losses.update({'all_channels_total': all_channels_total_loss})
 
-        if self.args.experiment.cumulative:
+        if total_cumulative_losses:
             cumulative_wav_loss = total_cumulative_losses['wav'] / (i + 1)
             cumulative_stft_loss = total_cumulative_losses['stft'] / (i + 1)
             avg_losses.update({'cumulative_wav': cumulative_wav_loss})
             avg_losses.update({'cumulative_stft': cumulative_stft_loss})
             avg_losses.update({'cumulative_total': cumulative_wav_loss + cumulative_stft_loss})
 
-        if self.adversarial_mode:
-            avg_losses.update({'discriminator': discriminator_loss.item() / (i + 1)})
         return avg_losses
 
+
+    def _get_adversarial_avg_losses(self, total_channels_losses):
+        avg_losses = {}
+        all_channels_gen_loss = 0
+        all_channels_disc_loss = 0
+        for j in range(len(total_channels_losses)):
+            avg_gen_loss_j = sum(total_channels_losses[j]['generator']) / len(total_channels_losses[j]['generator']) \
+                if len(total_channels_losses[j]['generator']) else 0
+            avg_disc_loss_j = sum(total_channels_losses[j]['discriminator']) / len(total_channels_losses[j]['discriminator']) \
+                if len(total_channels_losses[j]['discriminator']) else 0
+            avg_losses.update({f'generator_{j}': avg_gen_loss_j})
+            avg_losses.update({f'discriminator_{j}': avg_disc_loss_j})
+            all_channels_gen_loss += avg_gen_loss_j
+            all_channels_disc_loss += avg_disc_loss_j
+        all_channels_gen_loss /= len(total_channels_losses)
+        all_channels_disc_loss /= len(total_channels_losses)
+
+        avg_losses.update({'all_channels_avg_generator': all_channels_gen_loss})
+        avg_losses.update({'all_channels_avg_discriminator': all_channels_disc_loss})
+
+        return avg_losses
 
     def _get_loss(self, hr, pr, masks):
         n_losses = masks.shape[1]
@@ -474,6 +546,21 @@ class Solver(object):
 
         return cumulative_losses
 
+
+    def _get_adversarial_losses(self, hr_bands, pr, masks):
+        n_losses = masks.shape[1]
+        losses = [{'generator': None, 'discriminator': None} for j in range(n_losses)]
+        for i, mask_bit in enumerate(masks[0, :, 0]):
+            if mask_bit == 0:
+                if self.args.experiment.discriminator_model == 'hifi':
+                    pass
+                    # generator_loss, discriminator_loss = self._get_hifi_adversarial_loss(hr_bands, pr)
+                else:
+                    generator_loss, discriminator_loss = self._get_melgan_adversarial_loss(hr_bands, pr)
+                losses[i]['generator'] = generator_loss
+                losses[i]['discriminator'] = discriminator_loss
+
+        return losses
 
     def _get_melgan_adversarial_loss(self, hr, pr):
 
@@ -548,8 +635,6 @@ class Solver(object):
 
 
     def _optimize(self, losses):
-
-
         total_diff_loss = sum(loss['wav'] for loss in losses if loss['wav'])
         total_stft_loss = sum(loss['stft'] for loss in losses if loss['stft'])
         total_loss = total_diff_loss + total_stft_loss
@@ -559,8 +644,16 @@ class Solver(object):
             self.optimizer.step()
         # self.scheduler.step()
 
-    def _optimize_adversarial(self, discriminator_loss):
-        self.disc_optimizer.zero_grad()
-        discriminator_loss.backward()
-        self.disc_optimizer.step()
-        # self.disc_scheduler.step()
+    def _optimize_adversarial(self, channel_losses):
+        total_generator_loss = sum(loss['generator'] for loss in channel_losses if loss['generator'])
+        total_discriminator_loss = sum(loss['discriminator'] for loss in channel_losses if loss['discriminator'])
+
+        if total_generator_loss != 0:
+            self.optimizer.zero_grad()
+            total_generator_loss.backward()
+            self.optimizer.step()
+
+        if total_discriminator_loss != 0:
+            self.disc_optimizer.zero_grad()
+            total_discriminator_loss.backward()
+            self.disc_optimizer.step()

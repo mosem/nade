@@ -6,6 +6,7 @@ import os
 from tqdm import tqdm
 import torch
 import torchaudio
+import re
 import math
 import sys
 
@@ -67,6 +68,8 @@ class PrHrSet(Dataset):
         self.hr_filenames = list(sorted(filter(lambda x: x.endswith('_hr.wav'), files)))
         self.lr_filenames = list(sorted(filter(lambda x: x.endswith('_lr.wav'), files)))
         self.pr_filenames = list(sorted(filter(lambda x: x.endswith('_pr.wav'), files)))
+        self.pr_bands = list(sorted(filter(lambda x: re.match('.+_pr_\d.wav', x), files)))
+        self.hr_bands = list(sorted(filter(lambda x: re.match('.+_hr_\d.wav', x), files)))
 
     def __len__(self):
         return len(self.hr_filenames)
@@ -84,7 +87,19 @@ class PrHrSet(Dataset):
         pr_filename = self.pr_filenames[i]
         pr_filename = pr_filename[:pr_filename.index('_pr.wav')]
         assert lr_filename == hr_filename == pr_filename
-        return lr_i, hr_i, pr_i, lr_filename
+        pr_bands_i_filenames = sorted(filter(lambda x: x.startswith(pr_filename), self.pr_bands))
+        pr_bands_i = []
+        for j, filename in enumerate(pr_bands_i_filenames):
+            pr_band_i_j, _ = torchaudio.load(os.path.join(self.samples_dir, filename))
+            pr_bands_i.append(pr_band_i_j)
+
+        hr_bands_i_filenames = sorted(filter(lambda x: x.startswith(hr_filename), self.hr_bands))
+        hr_bands_i = []
+        for j, filename in enumerate(hr_bands_i_filenames):
+            hr_band_i_j, _ = torchaudio.load(os.path.join(self.samples_dir, filename))
+            hr_bands_i.append(hr_band_i_j)
+
+        return lr_i, hr_i, pr_i, pr_bands_i, hr_bands_i, lr_filename
 
 
 class LrHrSet(Dataset):

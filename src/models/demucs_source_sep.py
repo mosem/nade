@@ -16,6 +16,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import torchaudio
+import os
+
 
 class BLSTM(nn.Module):
     def __init__(self, dim, layers=1):
@@ -122,21 +125,24 @@ class DemucsSourceSep(nn.Module):
         else:
             activation = nn.ReLU()
             ch_scale = 1
+
+        n_groups = 1
         for index in range(depth):
             encode = []
-            encode += [nn.Conv1d(in_channels, channels, kernel_size, stride), nn.ReLU()]
+            encode += [nn.Conv1d(in_channels, channels, kernel_size, stride,groups=n_groups), nn.ReLU()]
             if rewrite:
-                encode += [nn.Conv1d(channels, ch_scale * channels, 1), activation]
+                encode += [nn.Conv1d(channels, ch_scale * channels, 1, groups=self.out_channels), activation]
             self.encoder.append(nn.Sequential(*encode))
 
             decode = []
             if index > 0:
+                n_groups = self.out_channels
                 out_channels = in_channels
             else:
                 out_channels = self.out_channels
             if rewrite:
-                decode += [nn.Conv1d(channels, ch_scale * channels, context), activation]
-            decode += [nn.ConvTranspose1d(channels, out_channels, kernel_size, stride)]
+                decode += [nn.Conv1d(channels, ch_scale * channels, context, groups=self.out_channels), activation]
+            decode += [nn.ConvTranspose1d(channels, out_channels, kernel_size, stride, groups=self.out_channels)]
             if index > 0:
                 decode.append(nn.ReLU())
             self.decoder.insert(0, nn.Sequential(*decode))
@@ -152,6 +158,8 @@ class DemucsSourceSep(nn.Module):
 
         if rescale:
             rescale_module(self, reference=rescale)
+
+        self.counter = 0
 
     def estimate_output_length(self, length):
         """
@@ -185,12 +193,16 @@ class DemucsSourceSep(nn.Module):
     def pad_to_valid_length(self, signal):
         valid_length = self.estimate_output_length(signal.shape[-1])
         padding_len = valid_length - signal.shape[-1]
-        signal = F.pad(signal, (0, padding_len))
+        signal = F.pad(signal, (padding_len//2, (padding_len - padding_len//2)))
         return signal, padding_len
 
-    def forward(self, mix, hr_len=None):
+    def forward(self, mix, hr_len=None,verbose=False):
         x = mix
         # logger.info(f'beginning of demucs: {x.shape}')
+        # logger.info(f'beginning of demucs: {x[0, 0:1, :].shape}')
+        if verbose:
+            torchaudio.save(os.path.join('samples',f'{self.counter}_beginning.wav'), x[0, 0:1, :].cpu(), 16000)
+
 
         target_len = x.shape[-1]
         if self.upsample:
@@ -211,9 +223,12 @@ class DemucsSourceSep(nn.Module):
         if self.resample:
             x = resample(x, self.hr_sr, self.hr_sr*2)
             # logger.info(f'after resample: {x.shape}')
-
-
+        if verbose:
+            torchaudio.save(os.path.join('samples', f'{self.counter}_after_resample.wav'), x[0, 0:1, :].cpu(), 16000)
         x, padding_len = self.pad_to_valid_length(x)
+
+        if verbose:
+            torchaudio.save(os.path.join('samples', f'{self.counter}_after_padding.wav'), x[0, 0:1, :].cpu(), 16000)
 
         # logger.info(f'after padding: {x.shape}, padding: {padding_len}')
 
@@ -230,9 +245,12 @@ class DemucsSourceSep(nn.Module):
             x = x + skip
             x = decode(x)
 
+        if verbose:
+            torchaudio.save(os.path.join('samples', f'{self.counter}_before_trim.wav'), x[0, 0:1, :].cpu(), 16000)
         # logger.info(f'end of demucs: {x.shape}')
         if target_len < x.shape[-1]:
-            x = x[..., :target_len]
+            delta = x.shape[-1] - target_len
+            x = x[..., delta // 2:-(delta - delta // 2)]
 
         # logger.info(f'before resample: {x.shape}')
         if self.resample:
@@ -242,4 +260,7 @@ class DemucsSourceSep(nn.Module):
         x = x * std + mean
         x = x.view(x.size(0), self.out_channels, x.size(-1))
         # logger.info(f'end end of demucs: {x.shape}')
+        if verbose:
+            torchaudio.save(os.path.join('samples', f'{self.counter}_end.wav'), x[0, 0:1, :].cpu(), 16000)
+            self.counter += 1
         return x

@@ -6,6 +6,7 @@
 
 import math
 
+import torch
 from torchaudio.functional import resample
 from torch import nn
 
@@ -68,7 +69,9 @@ class DemucsSourceSep(nn.Module):
                  lr_sr=16000,
                  hr_sr=16000,
                  upsample=False,
-                 cumulative=False):
+                 cumulative=False,
+                 lr_n_bands=1,
+                 grouping=False):
         """
         Args:
             sources (list[str]): list of source names
@@ -116,6 +119,11 @@ class DemucsSourceSep(nn.Module):
         self.cumulative = cumulative
         self.upsample = upsample
 
+        self.lr_n_bands = lr_n_bands
+        self.hr_n_bands = self.out_channels
+
+        self.grouping = grouping
+
         self.encoder = nn.ModuleList()
         self.decoder = nn.ModuleList()
 
@@ -136,7 +144,7 @@ class DemucsSourceSep(nn.Module):
 
             decode = []
             if index > 0:
-                n_groups = self.out_channels
+                n_groups = self.out_channels if self.grouping else 1
                 out_channels = in_channels
             else:
                 out_channels = self.out_channels
@@ -212,14 +220,34 @@ class DemucsSourceSep(nn.Module):
             target_len *= 2
 
         if self.normalize:
-            mono = mix.mean(dim=1, keepdim=True)
-            mean = mono.mean(dim=-1, keepdim=True)
-            std = mono.std(dim=-1, keepdim=True)
+            lr_signals = x[:,:self.lr_n_bands,:]
+
+
+
+            lr_mono = lr_signals.mean(dim=1, keepdim=True)
+            lr_mean = lr_mono.mean(dim=-1, keepdim=True)
+            lr_std = lr_mono.std(dim=-1, keepdim=True)
+
+
+
+            x[:, :self.lr_n_bands, :] -= lr_mean
+            x[:, :self.lr_n_bands, :] /= (1e-5 + lr_std)
+            if self.training:
+                hr_signals = x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :]
+                batch_masks = x[:, -self.hr_n_bands:, 0]
+
+                hr_mono = hr_signals[batch_masks.type(torch.uint8), :].mean(dim=0, keepdim=True)
+                hr_mean = hr_mono.mean(dim=-1, keepdim=True)
+                hr_std = hr_mono.std(dim=-1, keepdim=True)
+
+                x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :] -= hr_mean
+                x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :] /= (1e-5 + hr_std)
+
         else:
             mean = 0
             std = 1
+            x = (x - mean) / (1e-5 + std)
 
-        x = (x - mean) / (1e-5 + std)
         if self.resample:
             x = resample(x, self.hr_sr, self.hr_sr*2)
             # logger.info(f'after resample: {x.shape}')
@@ -257,7 +285,16 @@ class DemucsSourceSep(nn.Module):
             x = resample(x, self.hr_sr * 2, self.hr_sr)
             # logger.info(f'after resample: {x.shape}')
 
-        x = x * std + mean
+        if self.normalize:
+
+            x[:, :self.lr_n_bands, :] = x[:, :self.lr_n_bands, :]* lr_std + lr_mean
+            if self.training:
+                x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :] = \
+                    x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :] * hr_std + hr_mean
+
+        else:
+            x = x * std + mean
+
         x = x.view(x.size(0), self.out_channels, x.size(-1))
         # logger.info(f'end end of demucs: {x.shape}')
         if verbose:

@@ -30,6 +30,8 @@ demucs_source_sep:
   hr_sr: ${experiment.hr_sr}
   upsample: False
   cumulative: ${experiment.cumulative}
+  lr_n_bands: ${experiment.lr_n_bands}
+  grouping: False
 
 cumulative: False
 save_cumulative: False

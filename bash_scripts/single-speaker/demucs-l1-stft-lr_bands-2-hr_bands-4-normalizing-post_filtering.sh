@@ -15,5 +15,6 @@ python train.py \
   experiment.demucs_source_sep.in_channels=10 \
   experiment.demucs_source_sep.out_channels=4 \
   experiment.demucs_source_sep.normalize=True \
-  experiment.demucs_source_sep.context=3 \
+  experiment.demucs_source_sep.context=1 \
+  experiment.post_filtering=True \
 

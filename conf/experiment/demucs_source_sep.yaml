@@ -1,5 +1,5 @@
 # @package experiment
-name: ${dummy}demucs,n_gibbs_steps:${experiment.n_gibbs_steps},n_bands:${experiment.n_bands},context:${experiment.demucs_source_sep.context}
+name: ${dummy}demucs,n_gibbs_steps:${experiment.n_gibbs_steps},n_bands:${experiment.n_bands},context:${experiment.demucs_source_sep.context},post_filtering:${experiment.post_filtering}
 
 # Dataset related
 lr_sr: 8000 # low resolution sample rate, added to support BWE. Should be included in training cfg
@@ -35,6 +35,7 @@ demucs_source_sep:
 
 cumulative: False
 save_cumulative: False
+post_filtering: False
 
 n_bands: 2
 lr_n_bands: 1

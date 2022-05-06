@@ -50,7 +50,7 @@ def evaluate(args, data_loader, epoch):
 
             pesq_i, stoi_i, snr_i, lsd_i, sisnr_i, visqol_i, estimate_i = run_metrics(hr, pr, args, filename)
             if filename in files_to_log:
-                log_to_wandb(pr, pr_bands, hr_bands, pesq_i, stoi_i, snr_i, lsd_i, sisnr_i, visqol_i,
+                log_to_wandb(pr, hr, pr_bands, hr_bands, pesq_i, stoi_i, snr_i, lsd_i, sisnr_i, visqol_i,
                              filename, epoch, hr_sr)
             total_pesq += pesq_i
             total_stoi += stoi_i
@@ -67,39 +67,45 @@ def evaluate(args, data_loader, epoch):
     return avg_pesq, avg_stoi, avg_lsd, avg_sisnr, avg_visqol
 
 
-def log_to_wandb(full_signal, pr_bands, hr_bands, pesq, stoi, snr, lsd, sisnr, visqol, filename, epoch, sr):
+def log_to_wandb(pr_signal, hr_signal, pr_bands, hr_bands, pesq, stoi, snr, lsd, sisnr, visqol, filename, epoch, sr):
     spectrogram_transform = Spectrogram()
-    enhanced_spectrogram = spectrogram_transform(full_signal).log2()[0, :, :].numpy()
-    full_spectrogram_wandb_image = wandb.Image(convert_spectrogram_to_heatmap(enhanced_spectrogram),
+    pr_enhanced_spectrogram = spectrogram_transform(pr_signal).log2()[0, :, :].numpy()
+    pr_spectrogram_wandb_image = wandb.Image(convert_spectrogram_to_heatmap(pr_enhanced_spectrogram),
                                                    caption=filename)
-    full_wandb_audio = wandb.Audio(full_signal.squeeze().numpy(), sample_rate=sr, caption=filename)
+    pr_wandb_audio = wandb.Audio(pr_signal.squeeze().numpy(), sample_rate=sr, caption=filename)
     wandb_dict = {f'test samples/{filename}/pesq': pesq,
                   f'test samples/{filename}/stoi': stoi,
                   f'test samples/{filename}/snr': snr,
                   f'test samples/{filename}/lsd': lsd,
                   f'test samples/{filename}/sisnr': sisnr,
                   f'test samples/{filename}/visqol': visqol,
-                  f'test samples/{filename}/spectrogram': full_spectrogram_wandb_image,
-                  f'test samples/{filename}/audio': full_wandb_audio}
+                  f'test samples/{filename}/pr_spectrogram': pr_spectrogram_wandb_image,
+                  f'test samples/{filename}/pr_audio': pr_wandb_audio}
 
     for i, band in enumerate(pr_bands):
-        name = f'{filename}_pr_band_{i}'
-        enhanced_spectrogram = spectrogram_transform(band).log2()[0, :, :].numpy()
-        enhanced_spectrogram_wandb_image = wandb.Image(convert_spectrogram_to_heatmap(enhanced_spectrogram),
-                                                       caption=name)
-        enhanced_wandb_audio = wandb.Audio(band.squeeze().numpy(), sample_rate=sr, caption=name)
-        wandb_dict.update({f'test samples/{filename}/{name}_spectrogram': enhanced_spectrogram_wandb_image,
-                           f'test samples/{filename}/{name}_audio': enhanced_wandb_audio})
+        pr_band_name = f'{filename}_pr_band_{i}'
+        pr_band_enhanced_spectrogram = spectrogram_transform(band).log2()[0, :, :].numpy()
+        pr_band_enhanced_spectrogram_wandb_image = wandb.Image(convert_spectrogram_to_heatmap(pr_band_enhanced_spectrogram),
+                                                       caption=pr_band_name)
+        pr_enhanced_wandb_audio = wandb.Audio(band.squeeze().numpy(), sample_rate=sr, caption=pr_band_name)
+        wandb_dict.update({f'test samples/{filename}/{pr_band_name}_spectrogram': pr_band_enhanced_spectrogram_wandb_image,
+                           f'test samples/{filename}/{pr_band_name}_audio': pr_enhanced_wandb_audio})
 
     if epoch <= 10:
+        hr_enhanced_spectrogram = spectrogram_transform(hr_signal).log2()[0, :, :].numpy()
+        hr_spectrogram_wandb_image = wandb.Image(convert_spectrogram_to_heatmap(hr_enhanced_spectrogram),
+                                                 caption=filename)
+        hr_wandb_audio = wandb.Audio(pr_signal.squeeze().numpy(), sample_rate=sr, caption=filename)
+        wandb_dict.update({f'test samples/{filename}/hr_spectrogram': hr_spectrogram_wandb_image,
+                           f'test samples/{filename}/hr_audio': hr_wandb_audio})
         for i, band in enumerate(hr_bands):
-            name = f'{filename}_hr_band_{i}'
-            enhanced_spectrogram = spectrogram_transform(band).log2()[0, :, :].numpy()
-            enhanced_spectrogram_wandb_image = wandb.Image(convert_spectrogram_to_heatmap(enhanced_spectrogram),
-                                                           caption=name)
-            enhanced_wandb_audio = wandb.Audio(band.squeeze().numpy(), sample_rate=sr, caption=name)
-            wandb_dict.update({f'test samples/{filename}/{name}_spectrogram': enhanced_spectrogram_wandb_image,
-                               f'test samples/{filename}/{name}_audio': enhanced_wandb_audio})
+            hr_band_name = f'{filename}_hr_band_{i}'
+            hr_band_enhanced_spectrogram = spectrogram_transform(band).log2()[0, :, :].numpy()
+            hr_band_enhanced_spectrogram_wandb_image = wandb.Image(convert_spectrogram_to_heatmap(hr_band_enhanced_spectrogram),
+                                                           caption=hr_band_name)
+            hr_band_enhanced_wandb_audio = wandb.Audio(band.squeeze().numpy(), sample_rate=sr, caption=hr_band_name)
+            wandb_dict.update({f'test samples/{filename}/{hr_band_name}_spectrogram': hr_band_enhanced_spectrogram_wandb_image,
+                               f'test samples/{filename}/{hr_band_name}_audio': hr_band_enhanced_wandb_audio})
 
     wandb.log(wandb_dict, step=epoch)
 

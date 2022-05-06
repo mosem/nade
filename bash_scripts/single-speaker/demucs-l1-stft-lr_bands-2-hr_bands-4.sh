@@ -14,4 +14,5 @@ python train.py \
   experiment.lr_n_bands=2 \
   experiment.demucs_source_sep.in_channels=10 \
   experiment.demucs_source_sep.out_channels=4 \
+  experiment.demucs_source_sep.context=3 \
 

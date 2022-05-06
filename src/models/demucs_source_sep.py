@@ -222,19 +222,15 @@ class DemucsSourceSep(nn.Module):
         if self.normalize:
             lr_signals = x[:,:self.lr_n_bands,:]
 
-
-
             lr_mono = lr_signals.mean(dim=1, keepdim=True)
             lr_mean = lr_mono.mean(dim=-1, keepdim=True)
             lr_std = lr_mono.std(dim=-1, keepdim=True)
 
-
-
             x[:, :self.lr_n_bands, :] -= lr_mean
             x[:, :self.lr_n_bands, :] /= (1e-5 + lr_std)
-            if self.training:
+            batch_masks = x[:, -self.hr_n_bands:, 0]
+            if torch.any(batch_masks):
                 hr_signals = x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :]
-                batch_masks = x[:, -self.hr_n_bands:, 0]
 
                 hr_mono = hr_signals[batch_masks.type(torch.uint8), :].mean(dim=0, keepdim=True)
                 hr_mean = hr_mono.mean(dim=-1, keepdim=True)
@@ -286,11 +282,10 @@ class DemucsSourceSep(nn.Module):
             # logger.info(f'after resample: {x.shape}')
 
         if self.normalize:
-
-            x[:, :self.lr_n_bands, :] = x[:, :self.lr_n_bands, :]* lr_std + lr_mean
-            if self.training:
+            x[:, :self.lr_n_bands, :] = x[:, :self.lr_n_bands, :]* (1e-5 + lr_std) + lr_mean
+            if torch.any(batch_masks):
                 x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :] = \
-                    x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :] * hr_std + hr_mean
+                    x[:, self.lr_n_bands:self.lr_n_bands + self.hr_n_bands, :] * (1e-5 + hr_std) + hr_mean
 
         else:
             x = x * std + mean

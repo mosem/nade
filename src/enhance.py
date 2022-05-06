@@ -8,6 +8,7 @@ import torchaudio
 from torch.utils.data import DataLoader
 from concurrent.futures import ProcessPoolExecutor
 
+from src.augment import Augment
 from src.utils import LogProgress
 from src.data import LrHrSet
 from src.models.sinc import Sinc
@@ -29,7 +30,7 @@ def get_random_mask(n_bands, device, t, T):
     return (masks>p).int()
 
 
-def gibbs_inference(model, lr_sig, hr_sig, args):
+def gibbs_inference(model, augment, lr_sig, hr_sig, args):
     """
 
     :param model:
@@ -49,6 +50,10 @@ def gibbs_inference(model, lr_sig, hr_sig, args):
             out, out_cumulative = model(lr_sig, hr_sig.shape[-1])
         else:
             out = model(lr_sig, hr_sig.shape[-1])
+
+        for i in range(n_bands):
+            out[:,i,:] = augment.apply_bandpass(out[:,i,:],i)
+
         prev_out = out
 
         for i in range(1, n_steps):
@@ -62,6 +67,10 @@ def gibbs_inference(model, lr_sig, hr_sig, args):
                 tmp_out, tmp_out_cumulative = model(next_input, hr_sig.shape[-1])
             else:
                 tmp_out = model(next_input, hr_sig.shape[-1])
+
+            if 'post_filtering' in args.experiment and args.experiment.post_filtering:
+                for j in range(n_bands):
+                    tmp_out[:, j, :] = augment.apply_bandpass(tmp_out[:, j, :], j)
 
             # logger.info(f'{i}) masks: {masks[0, :, 0]}, binary?: {torch.all(sum(masks == 1, masks == 0)).item()}')
 
@@ -80,10 +89,10 @@ def gibbs_inference(model, lr_sig, hr_sig, args):
 
 
 
-def get_estimate(model, lr_sig, hr_sig, args):
+def get_estimate(model, augment, lr_sig, hr_sig, args):
     torch.set_num_threads(1)
     with torch.no_grad():
-        estimate = gibbs_inference(model, lr_sig, hr_sig, args)
+        estimate = gibbs_inference(model, augment, lr_sig, hr_sig, args)
     return estimate
 
 
@@ -129,7 +138,7 @@ def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_ba
 
         for i in range(hr.shape[0]):
             write(hr[i:i+1, :], filename + f'_hr_{i}.wav', sr=hr_sr)
-            write(pr[i:i + 1,:], filename + f'_pr_{i}.wav', sr=hr_sr)
+            write(pr[i:i+1,:], filename + f'_pr_{i}.wav', sr=hr_sr)
 
         hr = torch.sum(hr, keepdim=True, dim=0)
         pr = torch.sum(pr, keepdim=True, dim=0)
@@ -141,8 +150,8 @@ def save_wavs(processed_sigs, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_ba
         write(pr, filename + "_pr.wav", sr=hr_sr)
 
 
-def _estimate_and_save(model, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args, lr_n_bands):
-    estimate = get_estimate(model, lr_sigs, hr_sigs, args)
+def _estimate_and_save(model, augment, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args, lr_n_bands):
+    estimate = get_estimate(model, augment, lr_sigs, hr_sigs, args)
     if args.experiment.save_cumulative:
         estimate_channels, estimate_cumulative = estimate
         save_wavs_with_cumulative(estimate_channels, estimate_cumulative, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr,
@@ -158,7 +167,10 @@ def enhance(dataloader, model, args):
     lr_sr = args.experiment.lr_sr if 'experiment' in args else args.lr_sr
     hr_sr = args.experiment.hr_sr if 'experiment' in args else args.hr_sr
 
+    n_bands = args.experiment.n_bands
     lr_n_bands = args.experiment.lr_n_bands
+
+    augment = Augment(hr_sr, n_bands).to(args.device)
 
     total_filenames = []
 
@@ -175,10 +187,10 @@ def enhance(dataloader, model, args):
             if args.device == 'cpu' and args.num_workers > 1:
                 pendings.append(
                     pool.submit(_estimate_and_save,
-                                model, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args, lr_n_bands))
+                                model, augment, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, args, lr_n_bands))
             else:
                 # Forward
-                estimate = get_estimate(model, lr_sigs, hr_sigs, args)
+                estimate = get_estimate(model, augment, lr_sigs, hr_sigs, args)
                 if args.experiment.save_cumulative:
                     estimate_channels, estimate_cumulative = estimate
                     save_wavs_with_cumulative(estimate_channels, estimate_cumulative, lr_sigs, hr_sigs, filenames, lr_sr, hr_sr, lr_n_bands)
